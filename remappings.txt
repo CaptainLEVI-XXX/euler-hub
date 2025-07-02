@@ -1,0 +1,7 @@
+@solady/=lib/solady/src/
+@forge-std/=lib/forge-std/src/
+evk/=lib/euler-vault-kit/src/
+evc/=lib/ethereum-vault-connector/src/
+openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/
+ethereum-vault-connector/=lib/ethereum-vault-connector/src/
+
