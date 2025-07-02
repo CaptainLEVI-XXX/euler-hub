@@ -115,8 +115,8 @@ contract RiskManager is AccessControl {
         priceOracle = IPriceOracle(_priceOracle);
         volatilityOracle = IVolatilityOracle(_volatilityOracle);
 
-        _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(VAULT_ROLE, _vault);
+        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
+        // _grantRole(VAULT_ROLE, _vault);
 
         // Initialize default risk parameters
         riskParams = RiskParams({
@@ -218,8 +218,8 @@ contract RiskManager is AccessControl {
         // Calculate deleverage amount
         uint256 deleverageAmount = _calculateDeleverageAmount(position);
 
-        // Execute emergency deleverage through position manager
-        positionManager.emergencyDeleverage(position, deleverageAmount);
+        //@to-do Execute emergency deleverage through position manager
+        // positionManager.emergencyDeleverage(position, deleverageAmount);
 
         emit EmergencyDeleverageTriggered(position, deleverageAmount);
     }

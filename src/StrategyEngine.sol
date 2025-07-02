@@ -96,8 +96,8 @@ contract StrategyEngine is AccessControl {
         positionManager = IPositionManager(_positionManager);
         priceOracle = IPriceOracle(_priceOracle);
 
-        _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(VAULT_ROLE, _vault);
+        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
+        // _grantRole(VAULT_ROLE, _vault);
 
         // Default parameters - Conservative
         params = StrategyParams({
@@ -116,7 +116,7 @@ contract StrategyEngine is AccessControl {
 
     /// @notice Calculate optimal allocations across pairs
     /// @return strategyData Encoded allocation instructions
-    function calculateOptimalAllocations() external view onlyRole(VAULT_ROLE) returns (bytes memory strategyData) {
+    function calculateOptimalAllocations() external onlyRole(VAULT_ROLE) returns (bytes memory strategyData) {
         address[] memory activePairs = positionManager.getActivePositions();
         AllocationInstruction[] memory allocations = new AllocationInstruction[](activePairs.length);
 
@@ -289,7 +289,7 @@ contract StrategyEngine is AccessControl {
         int256 pairDelta = int256(pos.amount0 * token0Price / 1e18) - int256(pos.borrowed0 * token0Price / 1e18);
 
         // Check if pair delta deviates significantly
-        return _abs(pairDelta) > int256(params.rebalanceThreshold);
+        return _abs(pairDelta) > (params.rebalanceThreshold);
     }
 
     /// @dev Calculate correlation coefficient for a pair

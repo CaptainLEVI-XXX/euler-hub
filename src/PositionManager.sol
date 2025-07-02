@@ -6,7 +6,7 @@ import {SafeERC20} from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol"
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 
 import {IEVC} from "evc/interfaces/IEthereumVaultConnector.sol";
-import {IEVault} from "evk/EVault/IEVault.sol";
+import {IEVault, IBorrowing} from "evk/EVault/IEVault.sol";
 import {IEulerSwap} from "./interfaces/IEulerSwap.sol";
 import {IEulerSwapFactory} from "./interfaces/IEulerSwapFactory.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
@@ -100,8 +100,8 @@ contract PositionManager is AccessControl {
         eulerAccount = _eulerAccount;
         usdc = _usdc;
 
-        _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(VAULT_ROLE, _vault);
+        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
+        // _grantRole(VAULT_ROLE, _vault);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -128,7 +128,7 @@ contract PositionManager is AccessControl {
     /// @param pool EulerSwap pool address
     /// @param usdcAmount Amount of USDC to allocate
     function openPosition(address pool, uint256 usdcAmount) external onlyRole(STRATEGIST_ROLE) {
-        if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
+        //@to-do if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
 
         IEulerSwap eulerSwap = IEulerSwap(pool);
         (address asset0, address asset1) = eulerSwap.getAssets();
@@ -223,7 +223,7 @@ contract PositionManager is AccessControl {
         tokenVaults[token] = vault;
 
         // Approve vault for operations
-        IERC20(token).safeApprove(vault, type(uint256).max);
+        IERC20(token).forceApprove(vault, type(uint256).max);
 
         // Enable as collateral through EVC
         evc.enableCollateral(eulerAccount, vault);
@@ -284,7 +284,7 @@ contract PositionManager is AccessControl {
         if (pos.pool == address(0)) return;
 
         // Calculate current delta
-        (int256 currentDelta, uint256 targetBorrow) = _calculatePositionDelta(pos);
+        (int256 currentDelta,) = _calculatePositionDelta(pos);
 
         // Determine rebalancing action
         if (currentDelta > 0) {
@@ -339,7 +339,7 @@ contract PositionManager is AccessControl {
         evc.enableController(eulerAccount, vault);
 
         // Execute borrow through EVC
-        bytes memory data = abi.encodeCall(IEVault.borrow, (amount, address(this)));
+        bytes memory data = abi.encodeWithSelector(IBorrowing.borrow.selector, amount, address(this));
 
         evc.call(vault, eulerAccount, 0, data);
     }
@@ -350,7 +350,7 @@ contract PositionManager is AccessControl {
         if (vault == address(0)) revert VaultNotRegistered();
 
         // Approve vault for repayment
-        IERC20(token).safeApprove(vault, amount);
+        IERC20(token).forceApprove(vault, amount);
 
         // Repay through vault
         IEVault(vault).repay(amount, eulerAccount);
@@ -397,7 +397,7 @@ contract PositionManager is AccessControl {
     /// @dev Get LP position value in USDC
     function _getLPValue(address pool) internal view returns (uint256) {
         IEulerSwap eulerSwap = IEulerSwap(pool);
-        (uint112 reserve0, uint112 reserve1,) = eulerSwap.getReserves();
+        (, uint112 reserve1,) = eulerSwap.getReserves();
 
         // Simplified: assume reserve1 is USDC
         return uint256(reserve1) * 2; // Total value is 2x USDC reserves
@@ -433,7 +433,7 @@ contract PositionManager is AccessControl {
     }
 
     /// @dev Collect fees from a pool
-    function _collectPoolFees(address pool) internal returns (uint256) {
+    function _collectPoolFees(address) internal returns (uint256) {
         // Implementation depends on EulerSwap fee collection mechanism
         // This is a placeholder
         return 0;

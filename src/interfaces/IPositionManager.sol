@@ -13,6 +13,12 @@ interface IPositionManager {
         uint256 lastUpdate;
     }
 
+    struct AllocationInstruction {
+        address pair;
+        uint256 targetAllocation;
+        bool shouldRebalance;
+    }
+
     function executeStrategy(bytes calldata strategyData) external;
     function getTotalValue() external view returns (uint256);
     function claimRewards() external returns (uint256);

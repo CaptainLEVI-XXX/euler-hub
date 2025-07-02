@@ -8,6 +8,7 @@ import {SafeERC20} from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol"
 import {Pausable} from "openzeppelin-contracts/utils/Pausable.sol";
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 import {Math} from "openzeppelin-contracts/utils/math/Math.sol";
+import {IERC20Metadata} from "openzeppelin-contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {IEVC} from "evc/interfaces/IEthereumVaultConnector.sol";
 import {IEVault} from "evk/EVault/IEVault.sol";
@@ -20,7 +21,7 @@ import {Lock} from "./libraries/Lock.sol";
 /// @title Delta-Neutral Pooled Vault
 /// @notice ERC4626 vault that maintains delta-neutral LP positions across multiple pairs
 /// @dev Integrates with EulerSwap and Euler lending markets for automated hedging
-contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
+contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
     using Math for uint256;
@@ -117,7 +118,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
         lastHarvestTime = block.timestamp;
 
         // Approve EVC for operations
-        _asset.safeApprove(_evc, type(uint256).max);
+        _asset.forceApprove(_evc, type(uint256).max);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -323,20 +324,25 @@ contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
         if (feeAmount > 0) {
             totalManagementFees += feeAmount;
             // Mint fee shares to treasury
-            _mint(owner(), convertToShares(feeAmount));
+            _mint(owner, convertToShares(feeAmount));
         }
 
         lastManagementFeeCollection = block.timestamp;
     }
+    // function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual {}
 
     /// @dev Override transfer to handle pending withdrawals
-    function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual override {
-        super._beforeTokenTransfer(from, to, amount);
+    function _beforeTokenTransfer(address from, address, uint256 amount) internal virtual {
+        // super._beforeTokenTransfer(from, to, amount);
 
         // Ensure user can't transfer shares that are pending withdrawal
         if (from != address(0)) {
             // Not minting
             require(balanceOf(from) - pendingWithdrawals[from] >= amount, "Shares locked in withdrawal");
         }
+    }
+
+    function decimals() public view virtual override(ERC20, ERC4626) returns (uint8) {
+        return IERC20Metadata(asset()).decimals();
     }
 }
