@@ -128,12 +128,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
     /// @param assets Amount of assets to deposit
     /// @param receiver Address to receive shares
     /// @return shares Amount of shares minted
-    function deposit(uint256 assets, address receiver)
-        public
-        override
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
         // Collect management fees before deposit to ensure fair share price
         _collectManagementFees();
 
@@ -147,7 +142,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
 
     /// @notice Request withdrawal of shares
     /// @param shares Amount of shares to withdraw
-    function requestWithdrawal(uint256 shares) external  {
+    function requestWithdrawal(uint256 shares) external {
         if (shares > balanceOf(msg.sender) - pendingWithdrawals[msg.sender]) {
             revert InsufficientLiquidity();
         }
@@ -162,7 +157,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, AccessControl {
     }
 
     /// @notice Process matured withdrawal requests
-    function processWithdrawals() external  {
+    function processWithdrawals() external {
         WithdrawalRequest[] storage requests = withdrawalQueue[msg.sender];
         uint256 totalShares;
         uint256 totalAssets;

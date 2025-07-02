@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {Math} from "openzeppelin-contracts/utils/math/Math.sol";
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 import {IPriceOracle} from "./interfaces/IOracle.sol";
-import{IPositionManager} from "./interfaces/IPositionManager.sol";
+import {IPositionManager} from "./interfaces/IPositionManager.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 

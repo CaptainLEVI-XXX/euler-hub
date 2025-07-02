@@ -12,7 +12,6 @@ import {IEulerSwapFactory} from "./interfaces/IEulerSwapFactory.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 
-
 /// @title Position Manager for Delta-Neutral Vaults
 /// @notice Manages EulerSwap positions and borrowing operations
 contract PositionManager is AccessControl {
@@ -111,7 +110,7 @@ contract PositionManager is AccessControl {
 
     /// @notice Execute strategy allocations
     /// @param strategyData Encoded allocation instructions from StrategyEngine
-    function executeStrategy(bytes calldata strategyData) external onlyRole(VAULT_ROLE)  {
+    function executeStrategy(bytes calldata strategyData) external onlyRole(VAULT_ROLE) {
         AllocationInstruction[] memory allocations = abi.decode(strategyData, (AllocationInstruction[]));
 
         // Process each allocation instruction
@@ -172,7 +171,7 @@ contract PositionManager is AccessControl {
 
     /// @notice Close a position and repay debt
     /// @param pool EulerSwap pool address
-    function closePosition(address pool) external onlyRole(STRATEGIST_ROLE)  {
+    function closePosition(address pool) external onlyRole(STRATEGIST_ROLE) {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) revert PositionNotFound();
 

@@ -2,8 +2,7 @@
 pragma solidity ^0.8.27;
 
 interface IPositionManager {
-
-     struct Position {
+    struct Position {
         address pool;
         address token0;
         address token1;
