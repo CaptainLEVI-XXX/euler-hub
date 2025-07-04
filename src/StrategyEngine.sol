@@ -195,7 +195,6 @@ contract StrategyEngine is Roles {
         });
     }
 
-
     function getAllocationForRiskLevel(RiskLevel level)
         public
         pure

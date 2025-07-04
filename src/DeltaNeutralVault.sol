@@ -34,7 +34,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     address public immutable eulerAccount;
 
     // STORAGE
-   
+
     // Core components
     IStrategyEngine public strategyEngine;
     IPositionManager public positionManager;
@@ -207,6 +207,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     function setRiskManager(address _riskManager) external onlyAdmin {
         riskManager = IRiskManager(_riskManager);
     }
+
     function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyAdmin {
         if (_performanceFee > MAX_PERFORMANCE_FEE || _managementFee > MAX_MANAGEMENT_FEE) {
             revert InvalidConfiguration();
@@ -222,6 +223,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     function pause() external onlyGuardian {
         _pause();
     }
+
     function unpause() external onlyAdmin {
         _unpause();
     }
@@ -237,6 +239,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     function getTotalUserBalance(address user) external view returns (uint256) {
         return balanceOf(user) + pendingWithdrawals[user];
     }
+
     function getCurrentDelta() external view returns (int256) {
         if (address(strategyEngine) == address(0)) return 0;
         return strategyEngine.getDeltaExposure();

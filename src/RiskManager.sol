@@ -208,6 +208,7 @@ contract RiskManager is Roles {
         circuitBreaker.isTripped = false;
         emit CircuitBreakerReset();
     }
+
     function updateRiskParams(RiskParams calldata newParams) external onlyAdmin {
         riskParams = newParams;
         emit RiskParamsUpdated(newParams);
@@ -244,7 +245,6 @@ contract RiskManager is Roles {
         uint256 healthFactor = _calculateHealthFactor(position);
         return healthFactor < MIN_HEALTH_FACTOR;
     }
-
 
     function _calculateHealthFactor(address position) internal view returns (uint256) {
         IPositionManager.Position memory pos = positionManager.getPosition(position);
@@ -308,6 +308,7 @@ contract RiskManager is Roles {
         uint256 portfolioVol = _calculatePortfolioVolatility();
         return portfolioVol > MAX_HOURLY_VOLATILITY;
     }
+
     function _updatePortfolioTracking(uint256 currentValue) internal {
         uint256 currentHour = block.timestamp / 1 hours;
         uint256 currentDay = block.timestamp / 1 days;

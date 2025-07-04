@@ -19,7 +19,7 @@ contract PositionManager is Roles {
     using CustomRevert for bytes4;
 
     // CONSTANTS & IMMUTABLES
-   
+
     uint256 private constant MAX_SLIPPAGE = 200; // 2%
     uint256 private constant SLIPPAGE_DENOMINATOR = 10000;
 
@@ -29,10 +29,7 @@ contract PositionManager is Roles {
     address public immutable vault;
     address public immutable usdc; // Base asset
 
-
-
     // STRUCTS
-    
 
     struct AllocationInstruction {
         address pair;
@@ -228,7 +225,6 @@ contract PositionManager is Roles {
         return positions[pool];
     }
 
-   
     function getActivePositions() external view returns (address[] memory) {
         return activePositions;
     }
@@ -397,6 +393,7 @@ contract PositionManager is Roles {
     function _updateTVL() internal {
         totalValueLocked = getTotalValue();
     }
+
     function _removeFromActivePositions(address pool) internal {
         for (uint256 i = 0; i < activePositions.length; i++) {
             if (activePositions[i] == pool) {
