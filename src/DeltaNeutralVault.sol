@@ -6,10 +6,8 @@ import {ERC20} from "openzeppelin-contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "openzeppelin-contracts/utils/Pausable.sol";
-import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 import {Math} from "openzeppelin-contracts/utils/math/Math.sol";
 import {IERC20Metadata} from "openzeppelin-contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
 import {IEVC} from "evc/interfaces/IEthereumVaultConnector.sol";
 import {IEVault} from "evk/EVault/IEVault.sol";
 import {IPositionManager} from "./interfaces/IPositionManager.sol";
@@ -20,16 +18,12 @@ import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
 
 /// @title Delta-Neutral Pooled Vault
-/// @notice ERC4626 vault that maintains delta-neutral LP positions across multiple pairs
-/// @dev Integrates with EulerSwap and Euler lending markets for automated hedging
-contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
+contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
     using Math for uint256;
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTANTS & IMMUTABLES
-    // ═══════════════════════════════════════════════════════════════
 
     uint256 public constant MAX_PERFORMANCE_FEE = 3000; // 30%
     uint256 public constant MAX_MANAGEMENT_FEE = 200; // 2%
@@ -39,10 +33,8 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
     IEVC public immutable evc;
     address public immutable eulerAccount;
 
-    // ═══════════════════════════════════════════════════════════════
     // STORAGE
-    // ═══════════════════════════════════════════════════════════════
-
+   
     // Core components
     IStrategyEngine public strategyEngine;
     IPositionManager public positionManager;
@@ -75,9 +67,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
 
     address public owner;
 
-    // ═══════════════════════════════════════════════════════════════
     // EVENTS
-    // ═══════════════════════════════════════════════════════════════
 
     event StrategyUpdated(address indexed oldStrategy, address indexed newStrategy);
     event Rebalanced(uint256 indexed epoch, int256 deltaBefore, int256 deltaAfter);
@@ -86,9 +76,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
     event WithdrawalProcessed(address indexed user, uint256 shares, uint256 assets);
     event EmergencyWithdraw(address indexed user, uint256 assets);
 
-    // ═══════════════════════════════════════════════════════════════
     // ERRORS
-    // ═══════════════════════════════════════════════════════════════
 
     error InvalidConfiguration();
     error WithdrawalTooEarly();
@@ -97,9 +85,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
     error RebalanceNotNeeded();
     error StrategyExecutionFailed();
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTRUCTOR
-    // ═══════════════════════════════════════════════════════════════
 
     constructor(
         IERC20 _asset,
@@ -112,9 +98,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         evc = IEVC(_evc);
         eulerAccount = _eulerAccount;
 
-        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        // _grantRole(GUARDIAN_ROLE, msg.sender);
-
         lastManagementFeeCollection = block.timestamp;
         lastHarvestTime = block.timestamp;
 
@@ -122,14 +105,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         _asset.forceApprove(_evc, type(uint256).max);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - USER INTERACTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Deposit assets and receive vault shares
-    /// @param assets Amount of assets to deposit
-    /// @param receiver Address to receive shares
-    /// @return shares Amount of shares minted
     function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
         // Collect management fees before deposit to ensure fair share price
         _collectManagementFees();
@@ -142,8 +117,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         }
     }
 
-    /// @notice Request withdrawal of shares
-    /// @param shares Amount of shares to withdraw
     function requestWithdrawal(uint256 shares) external {
         if (shares > balanceOf(msg.sender) - pendingWithdrawals[msg.sender]) {
             revert InsufficientLiquidity();
@@ -158,7 +131,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         emit WithdrawalQueued(msg.sender, shares, withdrawalQueue[msg.sender].length - 1);
     }
 
-    /// @notice Process matured withdrawal requests
     function processWithdrawals() external {
         WithdrawalRequest[] storage requests = withdrawalQueue[msg.sender];
         uint256 totalShares;
@@ -184,11 +156,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         emit WithdrawalProcessed(msg.sender, totalShares, totalAssets);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - KEEPER OPERATIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Harvest yields from all positions
     function harvest() external onlyKeeper {
         uint256 rewards = positionManager.claimRewards();
 
@@ -202,7 +169,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         lastHarvestTime = block.timestamp;
     }
 
-    /// @notice Rebalance positions to maintain delta neutrality
     function rebalance() external onlyStrategist {
         if (!strategyEngine.shouldRebalance()) revert RebalanceNotNeeded();
 
@@ -226,17 +192,11 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         emit Rebalanced(currentEpoch, deltaBefore, deltaAfter);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - ADMIN
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Update strategy engine
     function setStrategyEngine(address _strategyEngine) external onlyAdmin {
         emit StrategyUpdated(address(strategyEngine), _strategyEngine);
         strategyEngine = IStrategyEngine(_strategyEngine);
     }
 
-    /// @notice Update position manager
     function setPositionManager(address _positionManager) external onlyAdmin {
         positionManager = IPositionManager(_positionManager);
 
@@ -244,12 +204,9 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         evc.setAccountOperator(eulerAccount, _positionManager, true);
     }
 
-    /// @notice Update risk manager
     function setRiskManager(address _riskManager) external onlyAdmin {
         riskManager = IRiskManager(_riskManager);
     }
-
-    /// @notice Update fee structure
     function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyAdmin {
         if (_performanceFee > MAX_PERFORMANCE_FEE || _managementFee > MAX_MANAGEMENT_FEE) {
             revert InvalidConfiguration();
@@ -262,21 +219,13 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         managementFee = _managementFee;
     }
 
-    /// @notice Emergency pause
-    function pause() external onlyRole(GUARDIAN_ROLE) {
+    function pause() external onlyGuardian {
         _pause();
     }
-
-    /// @notice Unpause
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function unpause() external onlyAdmin {
         _unpause();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PUBLIC VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Get total assets under management
     function totalAssets() public view override returns (uint256) {
         if (address(positionManager) == address(0)) {
             return IERC20(asset()).balanceOf(address(this));
@@ -285,22 +234,14 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         return IERC20(asset()).balanceOf(address(this)) + positionManager.getTotalValue();
     }
 
-    /// @notice Get user's total balance including pending withdrawals
     function getTotalUserBalance(address user) external view returns (uint256) {
         return balanceOf(user) + pendingWithdrawals[user];
     }
-
-    /// @notice Get current delta exposure
     function getCurrentDelta() external view returns (int256) {
         if (address(strategyEngine) == address(0)) return 0;
         return strategyEngine.getDeltaExposure();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Deploy idle capital according to strategy
     function _deployCapital() internal {
         uint256 idleBalance = IERC20(asset()).balanceOf(address(this));
 
@@ -317,7 +258,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
         }
     }
 
-    /// @dev Collect management fees
     function _collectManagementFees() internal {
         uint256 timePassed = block.timestamp - lastManagementFeeCollection;
         uint256 feeAmount = (totalAssets() * managementFee * timePassed) / (FEE_DENOMINATOR * 365 days);
@@ -332,7 +272,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
     }
     // function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual {}
 
-    /// @dev Override transfer to handle pending withdrawals
     function _beforeTokenTransfer(address from, address, uint256 amount) internal virtual {
         // super._beforeTokenTransfer(from, to, amount);
 

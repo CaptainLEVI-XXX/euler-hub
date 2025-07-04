@@ -14,15 +14,12 @@ import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
 
 /// @title Position Manager for Delta-Neutral Vaults
-/// @notice Manages EulerSwap positions and borrowing operations
 contract PositionManager is Roles {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTANTS & IMMUTABLES
-    // ═══════════════════════════════════════════════════════════════
-
+   
     uint256 private constant MAX_SLIPPAGE = 200; // 2%
     uint256 private constant SLIPPAGE_DENOMINATOR = 10000;
 
@@ -32,13 +29,10 @@ contract PositionManager is Roles {
     address public immutable vault;
     address public immutable usdc; // Base asset
 
-    // ═══════════════════════════════════════════════════════════════
-    // STORAGE
-    // ═══════════════════════════════════════════════════════════════
 
-    // ═══════════════════════════════════════════════════════════════
+
     // STRUCTS
-    // ═══════════════════════════════════════════════════════════════
+    
 
     struct AllocationInstruction {
         address pair;
@@ -46,7 +40,6 @@ contract PositionManager is Roles {
         bool shouldRebalance;
     }
 
-    // Position tracking
     struct Position {
         address pool; // EulerSwap pool address
         address token0; // First token (non-USDC)
@@ -70,9 +63,7 @@ contract PositionManager is Roles {
     uint256 public totalFeesEarned;
     mapping(address => uint256) public poolFeesEarned;
 
-    // ═══════════════════════════════════════════════════════════════
     // EVENTS
-    // ═══════════════════════════════════════════════════════════════
 
     event PositionOpened(
         address indexed pool, address indexed token0, uint256 amount0, uint256 amount1, uint256 borrowed
@@ -85,9 +76,7 @@ contract PositionManager is Roles {
     event FeesCollected(address indexed pool, uint256 amount);
     event VaultRegistered(address indexed token, address indexed vault);
 
-    // ═══════════════════════════════════════════════════════════════
     // ERRORS
-    // ═══════════════════════════════════════════════════════════════
 
     error InvalidPool();
     error InsufficientLiquidity();
@@ -96,9 +85,7 @@ contract PositionManager is Roles {
     error PositionNotFound();
     error VaultNotRegistered();
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTRUCTOR
-    // ═══════════════════════════════════════════════════════════════
 
     constructor(
         address _vault,
@@ -113,17 +100,8 @@ contract PositionManager is Roles {
         eulerSwapFactory = IEulerSwapFactory(_eulerSwapFactory);
         eulerAccount = _eulerAccount;
         usdc = _usdc;
-
-        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        // _grantRole(VAULT_ROLE, _vault);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - POSITION MANAGEMENT
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Execute strategy allocations
-    /// @param strategyData Encoded allocation instructions from StrategyEngine
     function executeStrategy(bytes calldata strategyData) external onlyVault {
         AllocationInstruction[] memory allocations = abi.decode(strategyData, (AllocationInstruction[]));
 
@@ -138,9 +116,6 @@ contract PositionManager is Roles {
         _updateTVL();
     }
 
-    /// @notice Open a new delta-neutral position
-    /// @param pool EulerSwap pool address
-    /// @param usdcAmount Amount of USDC to allocate
     function openPosition(address pool, uint256 usdcAmount) external onlyStrategist {
         //@to-do if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
 
@@ -183,8 +158,6 @@ contract PositionManager is Roles {
         emit PositionOpened(pool, borrowToken, amount0, amount1, borrowAmount);
     }
 
-    /// @notice Close a position and repay debt
-    /// @param pool EulerSwap pool address
     function closePosition(address pool) external onlyStrategist {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) revert PositionNotFound();
@@ -207,7 +180,6 @@ contract PositionManager is Roles {
         emit PositionClosed(pool, amount0, amount1, pos.borrowed0 + pos.borrowed1);
     }
 
-    /// @notice Claim all available rewards
     function claimRewards() external onlyVault returns (uint256 totalRewards) {
         for (uint256 i = 0; i < activePositions.length; i++) {
             address pool = activePositions[i];
@@ -228,11 +200,6 @@ contract PositionManager is Roles {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - ADMIN
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Register an Euler vault for a token
     function registerVault(address token, address vault) external onlyAdmin {
         tokenVaults[token] = vault;
 
@@ -245,11 +212,6 @@ contract PositionManager is Roles {
         emit VaultRegistered(token, vault);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PUBLIC VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Get total value of all positions in USDC
     function getTotalValue() public view returns (uint256 totalValue) {
         for (uint256 i = 0; i < activePositions.length; i++) {
             Position memory pos = positions[activePositions[i]];
@@ -262,17 +224,15 @@ contract PositionManager is Roles {
         }
     }
 
-    /// @notice Get specific position details
     function getPosition(address pool) external view returns (Position memory) {
         return positions[pool];
     }
 
-    /// @notice Get all active position addresses
+   
     function getActivePositions() external view returns (address[] memory) {
         return activePositions;
     }
 
-    /// @notice Check if position is healthy
     function isPositionHealthy(address pool) external view returns (bool) {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) return false;
@@ -288,11 +248,6 @@ contract PositionManager is Roles {
         return true;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS - POSITION OPERATIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Rebalance a position to maintain delta neutrality
     function _rebalancePosition(AllocationInstruction memory instruction) internal {
         Position storage pos = positions[instruction.pair];
         if (pos.pool == address(0)) return;
@@ -318,7 +273,6 @@ contract PositionManager is Roles {
         emit PositionRebalanced(instruction.pair, currentDelta, 0);
     }
 
-    /// @dev Add liquidity to EulerSwap pool
     function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
         // Transfer tokens to pool
         IERC20(token0).safeTransfer(pool, amount0);
@@ -328,7 +282,6 @@ contract PositionManager is Roles {
         IEulerSwap(pool).swap(0, 0, address(this), "");
     }
 
-    /// @dev Remove liquidity from pool
     function _removeLiquidity(address pool, uint256 amount0, uint256 amount1) internal returns (uint256, uint256) {
         IEulerSwap eulerSwap = IEulerSwap(pool);
 
@@ -344,7 +297,6 @@ contract PositionManager is Roles {
         return (withdraw0, withdraw1);
     }
 
-    /// @dev Borrow asset through Euler vault
     function _borrowAsset(address token, uint256 amount) internal {
         address vault = tokenVaults[token];
         if (vault == address(0)) revert VaultNotRegistered();
@@ -358,7 +310,6 @@ contract PositionManager is Roles {
         evc.call(vault, eulerAccount, 0, data);
     }
 
-    /// @dev Repay borrowed asset
     function _repayAsset(address token, uint256 amount) internal {
         address vault = tokenVaults[token];
         if (vault == address(0)) revert VaultNotRegistered();
@@ -375,11 +326,6 @@ contract PositionManager is Roles {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS - CALCULATIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Calculate borrow amount for delta-neutral position
     function _calculateBorrowAmount(address borrowToken, uint256 usdcAmount, address pool)
         internal
         view
@@ -393,7 +339,6 @@ contract PositionManager is Roles {
         return price / 2;
     }
 
-    /// @dev Calculate position delta and target borrow amount
     function _calculatePositionDelta(Position memory pos) internal view returns (int256 delta, uint256 targetBorrow) {
         // Get current LP value
         uint256 lpValue = _getLPValue(pos.pool);
@@ -408,7 +353,6 @@ contract PositionManager is Roles {
         targetBorrow = token0Exposure;
     }
 
-    /// @dev Get LP position value in USDC
     function _getLPValue(address pool) internal view returns (uint256) {
         IEulerSwap eulerSwap = IEulerSwap(pool);
         (, uint112 reserve1,) = eulerSwap.getReserves();
@@ -417,7 +361,6 @@ contract PositionManager is Roles {
         return uint256(reserve1) * 2; // Total value is 2x USDC reserves
     }
 
-    /// @dev Get debt value in USDC
     function _getDebtValue(Position memory pos) internal view returns (uint256) {
         uint256 debtValue;
 
@@ -434,7 +377,6 @@ contract PositionManager is Roles {
         return debtValue;
     }
 
-    /// @dev Check if borrow position is healthy
     function _checkBorrowHealth(address token, uint256 borrowed) internal view returns (bool) {
         address vault = tokenVaults[token];
         if (vault == address(0)) return false;
@@ -446,19 +388,15 @@ contract PositionManager is Roles {
         return collateral >= (borrowed * 150) / 100;
     }
 
-    /// @dev Collect fees from a pool
     function _collectPoolFees(address) internal returns (uint256) {
         // Implementation depends on EulerSwap fee collection mechanism
         // This is a placeholder
         return 0;
     }
 
-    /// @dev Update total value locked
     function _updateTVL() internal {
         totalValueLocked = getTotalValue();
     }
-
-    /// @dev Remove pool from active positions array
     function _removeFromActivePositions(address pool) internal {
         for (uint256 i = 0; i < activePositions.length; i++) {
             if (activePositions[i] == pool) {

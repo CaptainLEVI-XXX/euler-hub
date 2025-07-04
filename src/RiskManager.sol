@@ -9,14 +9,11 @@ import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
 
 /// @title Risk Manager for Delta-Neutral Vaults
-/// @notice Monitors and mitigates various risks including liquidation, oracle, and market risks
 contract RiskManager is Roles {
     using Math for uint256;
     using CustomRevert for bytes4;
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTANTS
-    // ═══════════════════════════════════════════════════════════════
 
     uint256 public constant MIN_HEALTH_FACTOR = 150; // 1.5x
     uint256 public constant CRITICAL_HEALTH_FACTOR = 120; // 1.2x
@@ -29,17 +26,11 @@ contract RiskManager is Roles {
     uint256 public constant MAX_HOURLY_VOLATILITY = 5; // 5%
     uint256 public constant ORACLE_DEVIATION_THRESHOLD = 3; // 3%
 
-    // ═══════════════════════════════════════════════════════════════
-    // STORAGE
-    // ═══════════════════════════════════════════════════════════════
-
-    // Core contracts
     IPositionManager public positionManager;
     IPriceOracle public priceOracle;
     IVolatilityOracle public volatilityOracle;
     address public vault;
 
-    // Risk parameters
     struct RiskParams {
         uint256 maxLeverage; // Maximum allowed leverage
         uint256 minCollateralRatio; // Minimum collateral ratio
@@ -50,7 +41,6 @@ contract RiskManager is Roles {
 
     RiskParams public riskParams;
 
-    // Circuit breaker state
     struct CircuitBreaker {
         bool isTripped;
         uint256 tripTime;
@@ -79,10 +69,7 @@ contract RiskManager is Roles {
     mapping(uint256 => uint256) public hourlyValues; // hour => value
     mapping(uint256 => uint256) public dailyValues; // day => value
 
-    // ═══════════════════════════════════════════════════════════════
-    // EVENTS
-    // ═══════════════════════════════════════════════════════════════
-
+    //Events
     event RiskCheckPerformed(uint256 timestamp, bool passed);
     event HighRiskPositionDetected(address indexed position, uint256 healthFactor);
     event CircuitBreakerTripped(string reason, uint256 duration);
@@ -90,9 +77,7 @@ contract RiskManager is Roles {
     event EmergencyDeleverageTriggered(address indexed position, uint256 amount);
     event RiskParamsUpdated(RiskParams params);
 
-    // ═══════════════════════════════════════════════════════════════
     // ERRORS
-    // ═══════════════════════════════════════════════════════════════
 
     error CircuitBreakerActive();
     error HealthFactorTooLow();
@@ -101,9 +86,7 @@ contract RiskManager is Roles {
     error OracleManipulationDetected();
     error VolatilityTooHigh();
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTRUCTOR
-    // ═══════════════════════════════════════════════════════════════
 
     constructor(
         address _vault,
@@ -117,10 +100,6 @@ contract RiskManager is Roles {
         priceOracle = IPriceOracle(_priceOracle);
         volatilityOracle = IVolatilityOracle(_volatilityOracle);
 
-        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        // _grantRole(VAULT_ROLE, _vault);
-
-        // Initialize default risk parameters
         riskParams = RiskParams({
             maxLeverage: 300, // 3x max
             minCollateralRatio: 150, // 150%
@@ -135,11 +114,8 @@ contract RiskManager is Roles {
         lastDayValue = 0;
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // EXTERNAL FUNCTIONS - RISK CHECKS
-    // ═══════════════════════════════════════════════════════════════
 
-    /// @notice Check health factors for all positions
     function checkHealthFactors() external view onlyVault returns (bool allHealthy) {
         if (circuitBreaker.isTripped) revert CircuitBreakerActive();
 
@@ -158,7 +134,6 @@ contract RiskManager is Roles {
         return allHealthy;
     }
 
-    /// @notice Check if rebalance operation is safe
     function isRebalanceSafe(bytes calldata rebalanceData) external view onlyVault returns (bool) {
         if (circuitBreaker.isTripped) return false;
 
@@ -186,7 +161,6 @@ contract RiskManager is Roles {
         return true;
     }
 
-    /// @notice Perform comprehensive risk assessment
     function performRiskAssessment() external {
         // Update portfolio tracking
         uint256 currentValue = positionManager.getTotalValue();
@@ -205,11 +179,6 @@ contract RiskManager is Roles {
         emit RiskCheckPerformed(block.timestamp, !circuitBreaker.isTripped);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - EMERGENCY ACTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Trigger emergency deleverage for critical positions
     function emergencyDeleverage(address position) external onlyGuardian {
         PositionRisk memory risk = positionRisks[position];
 
@@ -226,7 +195,6 @@ contract RiskManager is Roles {
         emit EmergencyDeleverageTriggered(position, deleverageAmount);
     }
 
-    /// @notice Trip circuit breaker manually
     function tripCircuitBreaker(string calldata reason) external onlyGuardian {
         circuitBreaker =
             CircuitBreaker({isTripped: true, tripTime: block.timestamp, reason: reason, cooldownPeriod: 4 hours});
@@ -234,29 +202,17 @@ contract RiskManager is Roles {
         emit CircuitBreakerTripped(reason, 4 hours);
     }
 
-    /// @notice Reset circuit breaker after cooldown
     function resetCircuitBreaker() external onlyGuardian {
         require(block.timestamp >= circuitBreaker.tripTime + circuitBreaker.cooldownPeriod, "Cooldown not complete");
 
         circuitBreaker.isTripped = false;
         emit CircuitBreakerReset();
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - ADMIN
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Update risk parameters
     function updateRiskParams(RiskParams calldata newParams) external onlyAdmin {
         riskParams = newParams;
         emit RiskParamsUpdated(newParams);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PUBLIC VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Get current portfolio risk metrics
     function getPortfolioRiskMetrics()
         external
         view
@@ -284,17 +240,12 @@ contract RiskManager is Roles {
         portfolioVolatility = _calculatePortfolioVolatility();
     }
 
-    /// @notice Check if position is at risk of liquidation
     function isPositionAtRisk(address position) external view returns (bool) {
         uint256 healthFactor = _calculateHealthFactor(position);
         return healthFactor < MIN_HEALTH_FACTOR;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS - RISK CALCULATIONS
-    // ═══════════════════════════════════════════════════════════════
 
-    /// @dev Calculate health factor for a position
     function _calculateHealthFactor(address position) internal view returns (uint256) {
         IPositionManager.Position memory pos = positionManager.getPosition(position);
 
@@ -311,7 +262,6 @@ contract RiskManager is Roles {
         return (collateralValue * 100) / debtValue;
     }
 
-    /// @dev Calculate liquidation price for a position
     function _calculateLiquidationPrice(address position) internal view returns (uint256) {
         IPositionManager.Position memory pos = positionManager.getPosition(position);
 
@@ -320,7 +270,6 @@ contract RiskManager is Roles {
         return (currentPrice * 80) / 100;
     }
 
-    /// @dev Check if allocation is safe
     function _isAllocationSafe(IPositionManager.AllocationInstruction memory allocation) internal view returns (bool) {
         // Check concentration
         uint256 totalValue = positionManager.getTotalValue();
@@ -341,7 +290,6 @@ contract RiskManager is Roles {
         return true;
     }
 
-    /// @dev Detect potential oracle manipulation
     function _detectOracleManipulation() internal view returns (bool) {
         address[] memory positions = positionManager.getActivePositions();
 
@@ -356,17 +304,10 @@ contract RiskManager is Roles {
         return false;
     }
 
-    /// @dev Check if market volatility is excessive
     function _isMarketVolatilityExcessive() internal view returns (bool) {
         uint256 portfolioVol = _calculatePortfolioVolatility();
         return portfolioVol > MAX_HOURLY_VOLATILITY;
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS - TRACKING & MONITORING
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Update portfolio value tracking
     function _updatePortfolioTracking(uint256 currentValue) internal {
         uint256 currentHour = block.timestamp / 1 hours;
         uint256 currentDay = block.timestamp / 1 days;
@@ -386,7 +327,6 @@ contract RiskManager is Roles {
         lastPortfolioValue = currentValue;
     }
 
-    /// @dev Check circuit breaker conditions
     function _checkCircuitBreakerConditions(uint256 currentValue) internal {
         // Check hourly drawdown
         if (lastHourValue > 0) {
@@ -446,25 +386,18 @@ contract RiskManager is Roles {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS - HELPERS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Get position collateral value
     function _getPositionCollateralValue(IPositionManager.Position memory pos) internal view returns (uint256) {
         uint256 value0 = pos.amount0 * priceOracle.getPrice(pos.token0) / 1e18;
         uint256 value1 = pos.amount1 * priceOracle.getPrice(pos.token1) / 1e18;
         return value0 + value1;
     }
 
-    /// @dev Get position debt value
     function _getPositionDebt(IPositionManager.Position memory pos) internal view returns (uint256) {
         uint256 debt0 = pos.borrowed0 * priceOracle.getPrice(pos.token0) / 1e18;
         uint256 debt1 = pos.borrowed1 * priceOracle.getPrice(pos.token1) / 1e18;
         return debt0 + debt1;
     }
 
-    /// @dev Calculate position leverage
     function _calculatePositionLeverage(IPositionManager.Position memory pos) internal view returns (uint256) {
         uint256 collateral = _getPositionCollateralValue(pos);
         uint256 debt = _getPositionDebt(pos);
@@ -473,16 +406,13 @@ contract RiskManager is Roles {
         return ((collateral + debt) * 100) / collateral;
     }
 
-    /// @dev Get position exposure
     function _getPositionExposure(address position) internal view returns (uint256) {
         IPositionManager.Position memory pos = positionManager.getPosition(position);
 
         return _getPositionCollateralValue(pos) - _getPositionDebt(pos);
     }
 
-    /// @dev Calculate portfolio volatility
     function _calculatePortfolioVolatility() internal view returns (uint256) {
-        // Simplified: average of token volatilities weighted by exposure
         address[] memory positions = positionManager.getActivePositions();
         uint256 totalVolatility;
         uint256 totalWeight;
@@ -500,7 +430,6 @@ contract RiskManager is Roles {
         return totalWeight > 0 ? totalVolatility / totalWeight : 0;
     }
 
-    /// @dev Calculate deleverage amount for emergency
     function _calculateDeleverageAmount(address position) internal view returns (uint256) {
         IPositionManager.Position memory pos = positionManager.getPosition(position);
 

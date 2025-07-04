@@ -9,30 +9,24 @@ import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 
 /// @title Strategy Engine for Delta-Neutral Vaults
-/// @notice Calculates optimal allocations and monitors delta exposure
 contract StrategyEngine is Roles {
     using Math for uint256;
     using CustomRevert for bytes4;
 
-    // ═══════════════════════════════════════════════════════════════
     // CONSTANTS
-    // ═══════════════════════════════════════════════════════════════
 
     uint256 public constant DELTA_PRECISION = 1e18;
     uint256 public constant MAX_DELTA_DEVIATION = 5e16; // 5%
     uint256 public constant MIN_REBALANCE_INTERVAL = 1 hours;
     uint256 public constant CORRELATION_WINDOW = 7 days;
 
-    // ═══════════════════════════════════════════════════════════════
     // STORAGE
-    // ═══════════════════════════════════════════════════════════════
 
     // Core contracts
     IPositionManager public positionManager;
     IPriceOracle public priceOracle;
     address public vault;
 
-    // Strategy parameters
     struct StrategyParams {
         uint256 maxAllocationPerPair; // Max % allocated to single pair
         uint256 minVolumeThreshold; // Min 24h volume for pair inclusion
@@ -75,18 +69,16 @@ contract StrategyEngine is Roles {
         bool successful;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EVENTS
-    // ═══════════════════════════════════════════════════════════════
+    struct AllocationInstruction {
+        address pair;
+        uint256 targetAllocation;
+        bool shouldRebalance;
+    }
 
     event PairWhitelisted(address indexed pair, bool status);
     event StrategyParamsUpdated(StrategyParams params);
     event RebalanceTriggered(int256 currentDelta, uint256 deviation);
     event AllocationCalculated(address indexed pair, uint256 allocation);
-
-    // ═══════════════════════════════════════════════════════════════
-    // CONSTRUCTOR
-    // ═══════════════════════════════════════════════════════════════
 
     constructor(address _vault, address _positionManager, address _priceOracle, address _accessRegistry)
         Roles(_accessRegistry)
@@ -106,12 +98,6 @@ contract StrategyEngine is Roles {
         });
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - STRATEGY INTERFACE
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Calculate optimal allocations across pairs
-    /// @return strategyData Encoded allocation instructions
     function calculateOptimalAllocations() external onlyVault returns (bytes memory strategyData) {
         address[] memory activePairs = positionManager.getActivePositions();
         AllocationInstruction[] memory allocations = new AllocationInstruction[](activePairs.length);
@@ -146,7 +132,6 @@ contract StrategyEngine is Roles {
         return abi.encode(allocations);
     }
 
-    /// @notice Check if rebalancing is needed
     function shouldRebalance() external view returns (bool) {
         // Check time constraint
         if (block.timestamp < lastRebalanceTime + MIN_REBALANCE_INTERVAL) {
@@ -165,7 +150,6 @@ contract StrategyEngine is Roles {
         return deviation > params.rebalanceThreshold;
     }
 
-    /// @notice Calculate current portfolio delta exposure
     function getDeltaExposure() public view returns (int256) {
         address[] memory positions = positionManager.getActivePositions();
         int256 totalDelta;
@@ -191,23 +175,16 @@ contract StrategyEngine is Roles {
         return totalDelta;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // EXTERNAL FUNCTIONS - ADMIN
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @notice Update strategy parameters
     function updateStrategyParams(StrategyParams calldata newParams) external onlyStrategist {
         params = newParams;
         emit StrategyParamsUpdated(newParams);
     }
 
-    /// @notice Whitelist a trading pair
     function whitelistPair(address pair, bool status) external onlyStrategist {
         whitelistedPairs[pair] = status;
         emit PairWhitelisted(pair, status);
     }
 
-    /// @notice Update pair metadata (called by keeper)
     function updatePairMetadata(address pair, uint256 volume24h, uint256 volatility30d) external onlyStrategist {
         pairMetadata[pair] = PairMetadata({
             volume24h: volume24h,
@@ -218,11 +195,7 @@ contract StrategyEngine is Roles {
         });
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PUBLIC VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
 
-    /// @notice Get allocation for risk level
     function getAllocationForRiskLevel(RiskLevel level)
         public
         pure
@@ -237,7 +210,6 @@ contract StrategyEngine is Roles {
         }
     }
 
-    /// @notice Get current strategy health metrics
     function getStrategyHealth()
         external
         view
@@ -249,11 +221,6 @@ contract StrategyEngine is Roles {
         needsRebalance = this.shouldRebalance();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    /// @dev Calculate score for a pair based on multiple factors
     function _calculatePairScore(address pair) internal view returns (uint256) {
         PairMetadata memory meta = pairMetadata[pair];
 
@@ -273,7 +240,6 @@ contract StrategyEngine is Roles {
         return volumeScore + volatilityScore + correlationScore;
     }
 
-    /// @dev Check if specific pair needs rebalancing
     function _shouldRebalancePair(address pair) internal view returns (bool) {
         IPositionManager.Position memory pos = positionManager.getPosition(pair);
 
@@ -285,25 +251,13 @@ contract StrategyEngine is Roles {
         return _abs(pairDelta) > (params.rebalanceThreshold);
     }
 
-    /// @dev Calculate correlation coefficient for a pair
     function _calculateCorrelation(address pair) internal view returns (uint256) {
         // Simplified correlation calculation
         // In production, would use historical price data
         return 20e16; // 20% correlation placeholder
     }
 
-    /// @dev Absolute value for int256
     function _abs(int256 x) internal pure returns (uint256) {
         return x >= 0 ? uint256(x) : uint256(-x);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // STRUCTS
-    // ═══════════════════════════════════════════════════════════════
-
-    struct AllocationInstruction {
-        address pair;
-        uint256 targetAllocation;
-        bool shouldRebalance;
     }
 }
