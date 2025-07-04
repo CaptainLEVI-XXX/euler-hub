@@ -11,20 +11,17 @@ import {IEulerSwap} from "./interfaces/IEulerSwap.sol";
 import {IEulerSwapFactory} from "./interfaces/IEulerSwapFactory.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
+import {Roles} from "./abstract/Roles.sol";
 
 /// @title Position Manager for Delta-Neutral Vaults
 /// @notice Manages EulerSwap positions and borrowing operations
-contract PositionManager is AccessControl {
+contract PositionManager is Roles {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
 
     // ═══════════════════════════════════════════════════════════════
     // CONSTANTS & IMMUTABLES
     // ═══════════════════════════════════════════════════════════════
-
-    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
-    bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     uint256 private constant MAX_SLIPPAGE = 200; // 2%
     uint256 private constant SLIPPAGE_DENOMINATOR = 10000;
@@ -38,6 +35,16 @@ contract PositionManager is AccessControl {
     // ═══════════════════════════════════════════════════════════════
     // STORAGE
     // ═══════════════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════════════
+    // STRUCTS
+    // ═══════════════════════════════════════════════════════════════
+
+    struct AllocationInstruction {
+        address pair;
+        uint256 targetAllocation;
+        bool shouldRebalance;
+    }
 
     // Position tracking
     struct Position {
@@ -93,7 +100,14 @@ contract PositionManager is AccessControl {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════
 
-    constructor(address _vault, address _evc, address _eulerSwapFactory, address _eulerAccount, address _usdc) {
+    constructor(
+        address _vault,
+        address _evc,
+        address _eulerSwapFactory,
+        address _eulerAccount,
+        address _usdc,
+        address _accessRegistry
+    ) Roles(_accessRegistry) {
         vault = _vault;
         evc = IEVC(_evc);
         eulerSwapFactory = IEulerSwapFactory(_eulerSwapFactory);
@@ -110,7 +124,7 @@ contract PositionManager is AccessControl {
 
     /// @notice Execute strategy allocations
     /// @param strategyData Encoded allocation instructions from StrategyEngine
-    function executeStrategy(bytes calldata strategyData) external onlyRole(VAULT_ROLE) {
+    function executeStrategy(bytes calldata strategyData) external onlyVault {
         AllocationInstruction[] memory allocations = abi.decode(strategyData, (AllocationInstruction[]));
 
         // Process each allocation instruction
@@ -127,7 +141,7 @@ contract PositionManager is AccessControl {
     /// @notice Open a new delta-neutral position
     /// @param pool EulerSwap pool address
     /// @param usdcAmount Amount of USDC to allocate
-    function openPosition(address pool, uint256 usdcAmount) external onlyRole(STRATEGIST_ROLE) {
+    function openPosition(address pool, uint256 usdcAmount) external onlyStrategist {
         //@to-do if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
 
         IEulerSwap eulerSwap = IEulerSwap(pool);
@@ -171,7 +185,7 @@ contract PositionManager is AccessControl {
 
     /// @notice Close a position and repay debt
     /// @param pool EulerSwap pool address
-    function closePosition(address pool) external onlyRole(STRATEGIST_ROLE) {
+    function closePosition(address pool) external onlyStrategist {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) revert PositionNotFound();
 
@@ -194,7 +208,7 @@ contract PositionManager is AccessControl {
     }
 
     /// @notice Claim all available rewards
-    function claimRewards() external onlyRole(VAULT_ROLE) returns (uint256 totalRewards) {
+    function claimRewards() external onlyVault returns (uint256 totalRewards) {
         for (uint256 i = 0; i < activePositions.length; i++) {
             address pool = activePositions[i];
             uint256 rewards = _collectPoolFees(pool);
@@ -219,7 +233,7 @@ contract PositionManager is AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Register an Euler vault for a token
-    function registerVault(address token, address vault) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function registerVault(address token, address vault) external onlyAdmin {
         tokenVaults[token] = vault;
 
         // Approve vault for operations
@@ -454,15 +468,5 @@ contract PositionManager is AccessControl {
                 break;
             }
         }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // STRUCTS
-    // ═══════════════════════════════════════════════════════════════
-
-    struct AllocationInstruction {
-        address pair;
-        uint256 targetAllocation;
-        bool shouldRebalance;
     }
 }

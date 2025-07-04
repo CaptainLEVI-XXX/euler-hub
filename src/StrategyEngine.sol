@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Math} from "openzeppelin-contracts/utils/math/Math.sol";
-import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
+import {Roles} from "./abstract/Roles.sol";
 import {IPriceOracle} from "./interfaces/IOracle.sol";
 import {IPositionManager} from "./interfaces/IPositionManager.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
@@ -10,16 +10,13 @@ import {Lock} from "./libraries/Lock.sol";
 
 /// @title Strategy Engine for Delta-Neutral Vaults
 /// @notice Calculates optimal allocations and monitors delta exposure
-contract StrategyEngine is AccessControl {
+contract StrategyEngine is Roles {
     using Math for uint256;
     using CustomRevert for bytes4;
 
     // ═══════════════════════════════════════════════════════════════
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════
-
-    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
-    bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
 
     uint256 public constant DELTA_PRECISION = 1e18;
     uint256 public constant MAX_DELTA_DEVIATION = 5e16; // 5%
@@ -91,13 +88,12 @@ contract StrategyEngine is AccessControl {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════
 
-    constructor(address _vault, address _positionManager, address _priceOracle) {
+    constructor(address _vault, address _positionManager, address _priceOracle, address _accessRegistry)
+        Roles(_accessRegistry)
+    {
         vault = _vault;
         positionManager = IPositionManager(_positionManager);
         priceOracle = IPriceOracle(_priceOracle);
-
-        // _setRoleAdmin(DEFAULT_ADMIN_ROLE, msg.sender);
-        // _grantRole(VAULT_ROLE, _vault);
 
         // Default parameters - Conservative
         params = StrategyParams({
@@ -116,7 +112,7 @@ contract StrategyEngine is AccessControl {
 
     /// @notice Calculate optimal allocations across pairs
     /// @return strategyData Encoded allocation instructions
-    function calculateOptimalAllocations() external onlyRole(VAULT_ROLE) returns (bytes memory strategyData) {
+    function calculateOptimalAllocations() external onlyVault returns (bytes memory strategyData) {
         address[] memory activePairs = positionManager.getActivePositions();
         AllocationInstruction[] memory allocations = new AllocationInstruction[](activePairs.length);
 
@@ -200,22 +196,19 @@ contract StrategyEngine is AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Update strategy parameters
-    function updateStrategyParams(StrategyParams calldata newParams) external onlyRole(STRATEGIST_ROLE) {
+    function updateStrategyParams(StrategyParams calldata newParams) external onlyStrategist {
         params = newParams;
         emit StrategyParamsUpdated(newParams);
     }
 
     /// @notice Whitelist a trading pair
-    function whitelistPair(address pair, bool status) external onlyRole(STRATEGIST_ROLE) {
+    function whitelistPair(address pair, bool status) external onlyStrategist {
         whitelistedPairs[pair] = status;
         emit PairWhitelisted(pair, status);
     }
 
     /// @notice Update pair metadata (called by keeper)
-    function updatePairMetadata(address pair, uint256 volume24h, uint256 volatility30d)
-        external
-        onlyRole(STRATEGIST_ROLE)
-    {
+    function updatePairMetadata(address pair, uint256 volume24h, uint256 volatility30d) external onlyStrategist {
         pairMetadata[pair] = PairMetadata({
             volume24h: volume24h,
             volatility30d: volatility30d,

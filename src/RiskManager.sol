@@ -1,26 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.27;
 
-import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 import {Math} from "openzeppelin-contracts/utils/math/Math.sol";
-import {IEVault} from "evk/EVault/IEVault.sol";
 import {IPositionManager} from "./interfaces/IPositionManager.sol";
 import {IPriceOracle, IVolatilityOracle} from "./interfaces/IOracle.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
+import {Roles} from "./abstract/Roles.sol";
 
 /// @title Risk Manager for Delta-Neutral Vaults
 /// @notice Monitors and mitigates various risks including liquidation, oracle, and market risks
-contract RiskManager is AccessControl {
+contract RiskManager is Roles {
     using Math for uint256;
     using CustomRevert for bytes4;
 
     // ═══════════════════════════════════════════════════════════════
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════
-
-    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
-    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
     uint256 public constant MIN_HEALTH_FACTOR = 150; // 1.5x
     uint256 public constant CRITICAL_HEALTH_FACTOR = 120; // 1.2x
@@ -109,7 +105,13 @@ contract RiskManager is AccessControl {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════
 
-    constructor(address _vault, address _positionManager, address _priceOracle, address _volatilityOracle) {
+    constructor(
+        address _vault,
+        address _positionManager,
+        address _priceOracle,
+        address _volatilityOracle,
+        address _accessRegistry
+    ) Roles(_accessRegistry) {
         vault = _vault;
         positionManager = IPositionManager(_positionManager);
         priceOracle = IPriceOracle(_priceOracle);
@@ -138,7 +140,7 @@ contract RiskManager is AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Check health factors for all positions
-    function checkHealthFactors() external view onlyRole(VAULT_ROLE) returns (bool allHealthy) {
+    function checkHealthFactors() external view onlyVault returns (bool allHealthy) {
         if (circuitBreaker.isTripped) revert CircuitBreakerActive();
 
         address[] memory positions = positionManager.getActivePositions();
@@ -157,7 +159,7 @@ contract RiskManager is AccessControl {
     }
 
     /// @notice Check if rebalance operation is safe
-    function isRebalanceSafe(bytes calldata rebalanceData) external view onlyRole(VAULT_ROLE) returns (bool) {
+    function isRebalanceSafe(bytes calldata rebalanceData) external view onlyVault returns (bool) {
         if (circuitBreaker.isTripped) return false;
 
         // Decode rebalance instructions
@@ -208,7 +210,7 @@ contract RiskManager is AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Trigger emergency deleverage for critical positions
-    function emergencyDeleverage(address position) external onlyRole(GUARDIAN_ROLE) {
+    function emergencyDeleverage(address position) external onlyGuardian {
         PositionRisk memory risk = positionRisks[position];
 
         if (risk.healthFactor >= CRITICAL_HEALTH_FACTOR) {
@@ -225,7 +227,7 @@ contract RiskManager is AccessControl {
     }
 
     /// @notice Trip circuit breaker manually
-    function tripCircuitBreaker(string calldata reason) external onlyRole(GUARDIAN_ROLE) {
+    function tripCircuitBreaker(string calldata reason) external onlyGuardian {
         circuitBreaker =
             CircuitBreaker({isTripped: true, tripTime: block.timestamp, reason: reason, cooldownPeriod: 4 hours});
 
@@ -233,7 +235,7 @@ contract RiskManager is AccessControl {
     }
 
     /// @notice Reset circuit breaker after cooldown
-    function resetCircuitBreaker() external onlyRole(GUARDIAN_ROLE) {
+    function resetCircuitBreaker() external onlyGuardian {
         require(block.timestamp >= circuitBreaker.tripTime + circuitBreaker.cooldownPeriod, "Cooldown not complete");
 
         circuitBreaker.isTripped = false;
@@ -245,7 +247,7 @@ contract RiskManager is AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Update risk parameters
-    function updateRiskParams(RiskParams calldata newParams) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateRiskParams(RiskParams calldata newParams) external onlyAdmin {
         riskParams = newParams;
         emit RiskParamsUpdated(newParams);
     }

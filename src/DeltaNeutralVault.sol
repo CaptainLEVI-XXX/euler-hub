@@ -17,11 +17,12 @@ import {IRiskManager} from "./interfaces/IRiskManager.sol";
 import {IStrategyEngine} from "./interfaces/IStrategyEngine.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
+import {Roles} from "./abstract/Roles.sol";
 
 /// @title Delta-Neutral Pooled Vault
 /// @notice ERC4626 vault that maintains delta-neutral LP positions across multiple pairs
 /// @dev Integrates with EulerSwap and Euler lending markets for automated hedging
-contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
+contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl, Roles {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
     using Math for uint256;
@@ -29,10 +30,6 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     // ═══════════════════════════════════════════════════════════════
     // CONSTANTS & IMMUTABLES
     // ═══════════════════════════════════════════════════════════════
-
-    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
-    bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
-    bytes32 public constant KEEPER_ROLE = keccak256("KEEPER_ROLE");
 
     uint256 public constant MAX_PERFORMANCE_FEE = 3000; // 30%
     uint256 public constant MAX_MANAGEMENT_FEE = 200; // 2%
@@ -104,10 +101,14 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════
 
-    constructor(IERC20 _asset, string memory _name, string memory _symbol, address _evc, address _eulerAccount)
-        ERC4626(_asset)
-        ERC20(_name, _symbol)
-    {
+    constructor(
+        IERC20 _asset,
+        string memory _name,
+        string memory _symbol,
+        address _evc,
+        address _eulerAccount,
+        address _accessRegistry
+    ) ERC4626(_asset) ERC20(_name, _symbol) Roles(_accessRegistry) {
         evc = IEVC(_evc);
         eulerAccount = _eulerAccount;
 
@@ -188,7 +189,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Harvest yields from all positions
-    function harvest() external onlyRole(KEEPER_ROLE) {
+    function harvest() external onlyKeeper {
         uint256 rewards = positionManager.claimRewards();
 
         if (rewards > 0) {
@@ -202,7 +203,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     }
 
     /// @notice Rebalance positions to maintain delta neutrality
-    function rebalance() external onlyRole(STRATEGIST_ROLE) {
+    function rebalance() external onlyStrategist {
         if (!strategyEngine.shouldRebalance()) revert RebalanceNotNeeded();
 
         // Check health before rebalancing
@@ -230,13 +231,13 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Update strategy engine
-    function setStrategyEngine(address _strategyEngine) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setStrategyEngine(address _strategyEngine) external onlyAdmin {
         emit StrategyUpdated(address(strategyEngine), _strategyEngine);
         strategyEngine = IStrategyEngine(_strategyEngine);
     }
 
     /// @notice Update position manager
-    function setPositionManager(address _positionManager) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setPositionManager(address _positionManager) external onlyAdmin {
         positionManager = IPositionManager(_positionManager);
 
         // Grant necessary permissions through EVC
@@ -244,12 +245,12 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, AccessControl {
     }
 
     /// @notice Update risk manager
-    function setRiskManager(address _riskManager) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setRiskManager(address _riskManager) external onlyAdmin {
         riskManager = IRiskManager(_riskManager);
     }
 
     /// @notice Update fee structure
-    function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyAdmin {
         if (_performanceFee > MAX_PERFORMANCE_FEE || _managementFee > MAX_MANAGEMENT_FEE) {
             revert InvalidConfiguration();
         }
