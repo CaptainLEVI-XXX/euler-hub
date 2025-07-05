@@ -1,66 +1,27 @@
-## Foundry
+## How it works - Example Scenario
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+###  User Deposit
+    - User deposit 10,000 USDC in vault.
+    - Receives vault shares representing their position.
+    - USDC join the pool with other user's capital.
 
-Foundry consists of:
+### Position Creation.
+    - Vault has collected 1 M USDC in total.
+    - strategy Engine determines the optimal pairs(ETH/USDC,BTC/USDC etc.)
+    - for each pair , vault borrows the non-USDC asset.
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
 
-## Documentation
+### Delta Neutral Positioning example for ETH/USDC pair.
+    - Vault allocated 500K to ETH/USDC pair.
+    - Borrows 250ETH  (worth 500k at $2000/ETH).
+    - Create a LP position with 250ETH and 500K USDC.
+    - Net exposure : ZERO (borrowed ETH = LP position)
 
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+### Continous Rebalancing.
+    - Every Hour the system checks for delta exposure.
+    - If ETH prices rises to 2200/ETH
+        - LP position will have less ETH and more USDC.
+        - System borrows more ETH to maintain neutraility.
+    - If ETH prices falls to 1800/ETH
+        - LP position will have more ETH and less USDC.
+        - System repays some Borrowed ETH to maintain neutraility. 

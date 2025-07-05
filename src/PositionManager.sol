@@ -12,6 +12,7 @@ import {IEulerSwapFactory} from "./interfaces/IEulerSwapFactory.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
+import {console} from "forge-std/console.sol";
 
 /// @title Position Manager for Delta-Neutral Vaults
 contract PositionManager is Roles {
@@ -193,7 +194,7 @@ contract PositionManager is Roles {
 
         // Transfer all collected rewards to vault
         if (totalRewards > 0) {
-            IERC20(usdc).safeTransfer(vault, totalRewards);
+            IERC20(usdc).approve(vault, totalRewards);
         }
     }
 
@@ -270,9 +271,16 @@ contract PositionManager is Roles {
     }
 
     function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
+        console.log("Inside Add Liquidity", amount0, amount1);
+        console.log("token0 balance in pool", IERC20(token0).balanceOf(pool));
+        console.log("token1 balance in pool", IERC20(token1).balanceOf(pool));
         // Transfer tokens to pool
         IERC20(token0).safeTransfer(pool, amount0);
+        // console.log("Transfered token0 to pool");
+        // console.log("token1 balance in pool",IERC20(token1).balanceOf(pool));
+        // console.log("amount1",amount1);
         IERC20(token1).safeTransfer(pool, amount1);
+        // console.log("Transfered token1 to pool");
 
         // Execute swap with empty data to add liquidity
         IEulerSwap(pool).swap(0, 0, address(this), "");

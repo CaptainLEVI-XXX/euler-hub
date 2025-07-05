@@ -16,9 +16,10 @@ import {IStrategyEngine} from "./interfaces/IStrategyEngine.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
+import {console} from "forge-std/console.sol";
 
 /// @title Delta-Neutral Pooled Vault
-contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
+contract DeltaNeutralVault is ERC4626, Pausable, Roles {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
     using Math for uint256;
@@ -93,10 +94,12 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
         string memory _symbol,
         address _evc,
         address _eulerAccount,
-        address _accessRegistry
+        address _accessRegistry,
+        address _owner
     ) ERC4626(_asset) ERC20(_name, _symbol) Roles(_accessRegistry) {
         evc = IEVC(_evc);
         eulerAccount = _eulerAccount;
+        owner = _owner;
 
         lastManagementFeeCollection = block.timestamp;
         lastHarvestTime = block.timestamp;
@@ -134,30 +137,44 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
     function processWithdrawals() external {
         WithdrawalRequest[] storage requests = withdrawalQueue[msg.sender];
         uint256 totalShares;
-        uint256 totalAssets;
+        uint256 totalAsset;
+        console.log("Processing withdrawals for:", msg.sender);
+        console.log("Total requests:", requests.length);
+        console.log("Total shares:", totalSupply());
+        console.log("TOTAL ASSETS:", totalAssets());
 
         for (uint256 i = 0; i < requests.length; i++) {
             if (!requests[i].processed && block.timestamp >= requests[i].requestTime + WITHDRAWAL_DELAY) {
                 uint256 assets = convertToAssets(requests[i].shares);
+                console.log("Processing withdrawal:", requests[i].shares);
+                console.log("Processing assets:", assets);
                 totalShares += requests[i].shares;
-                totalAssets += assets;
+                totalAsset += assets;
                 requests[i].processed = true;
             }
         }
 
+        console.log("Total shares to Burn:", totalShares);
+
         if (totalShares == 0) revert WithdrawalTooEarly();
+        console.log("Total assets to withdraw:", totalAsset);
 
         pendingWithdrawals[msg.sender] -= totalShares;
 
         // Burn shares and transfer assets
         _burn(msg.sender, totalShares);
-        IERC20(asset()).safeTransfer(msg.sender, totalAssets);
+        console.log("Total assets to transfer:", totalAsset);
+        console.log("Total balance of Vault: ", IERC20(asset()).balanceOf(address(this)));
+        IERC20(asset()).transfer(msg.sender, totalAsset);
+        console.log("Total assets transferred:", totalAsset);
 
-        emit WithdrawalProcessed(msg.sender, totalShares, totalAssets);
+        emit WithdrawalProcessed(msg.sender, totalShares, totalAsset);
     }
 
     function harvest() external onlyKeeper {
         uint256 rewards = positionManager.claimRewards();
+
+        IERC20(asset()).safeTransferFrom(address(positionManager), address(this), rewards);
 
         if (rewards > 0) {
             uint256 perfFee = (rewards * performanceFee) / FEE_DENOMINATOR;
@@ -201,7 +218,7 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
         positionManager = IPositionManager(_positionManager);
 
         // Grant necessary permissions through EVC
-        evc.setAccountOperator(eulerAccount, _positionManager, true);
+        // evc.setAccountOperator(eulerAccount, _positionManager, false);
     }
 
     function setRiskManager(address _riskManager) external onlyAdmin {
@@ -228,17 +245,17 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
         _unpause();
     }
 
-    function totalAssets() public view override returns (uint256) {
-        if (address(positionManager) == address(0)) {
-            return IERC20(asset()).balanceOf(address(this));
-        }
+    // function totalAssets() public view override returns (uint256) {
+    //     if (address(positionManager) == address(0)) {
+    //         return IERC20(asset()).balanceOf(address(this));
+    //     }
 
-        return IERC20(asset()).balanceOf(address(this)) + positionManager.getTotalValue();
-    }
+    //     return IERC20(asset()).balanceOf(address(this)) + positionManager.getTotalValue();
+    // }
 
-    function getTotalUserBalance(address user) external view returns (uint256) {
-        return balanceOf(user) + pendingWithdrawals[user];
-    }
+    // function getTotalUserBalance(address user) external view returns (uint256) {
+    //     return balanceOf(user) + pendingWithdrawals[user];
+    // }
 
     function getCurrentDelta() external view returns (int256) {
         if (address(strategyEngine) == address(0)) return 0;
@@ -283,9 +300,5 @@ contract DeltaNeutralVault is ERC20, ERC4626, Pausable, Roles {
             // Not minting
             require(balanceOf(from) - pendingWithdrawals[from] >= amount, "Shares locked in withdrawal");
         }
-    }
-
-    function decimals() public view virtual override(ERC20, ERC4626) returns (uint8) {
-        return IERC20Metadata(asset()).decimals();
     }
 }

@@ -116,7 +116,7 @@ contract RiskManager is Roles {
 
     // EXTERNAL FUNCTIONS - RISK CHECKS
 
-    function checkHealthFactors() external view onlyVault returns (bool allHealthy) {
+    function checkHealthFactors() external view returns (bool allHealthy) {
         if (circuitBreaker.isTripped) revert CircuitBreakerActive();
 
         address[] memory positions = positionManager.getActivePositions();
@@ -134,7 +134,7 @@ contract RiskManager is Roles {
         return allHealthy;
     }
 
-    function isRebalanceSafe(bytes calldata rebalanceData) external view onlyVault returns (bool) {
+    function isRebalanceSafe(bytes calldata rebalanceData) external view returns (bool) {
         if (circuitBreaker.isTripped) return false;
 
         // Decode rebalance instructions
