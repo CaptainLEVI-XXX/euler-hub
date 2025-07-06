@@ -115,7 +115,9 @@ contract PositionManager is Roles {
     }
 
     function openPosition(address pool, uint256 usdcAmount) external onlyStrategist {
-        //@to-do if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
+        // if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
+
+        console.log("================openPosition=====================");
 
         IEulerSwap eulerSwap = IEulerSwap(pool);
         (address asset0, address asset1) = eulerSwap.getAssets();
@@ -127,14 +129,20 @@ contract PositionManager is Roles {
         // Calculate amount to borrow for delta-neutral position
         uint256 borrowAmount = _calculateBorrowAmount(borrowToken, usdcAmount, pool);
 
+        console.log("borrowAmount ", borrowAmount);
+
         // Execute borrow through EVC
         _borrowAsset(borrowToken, borrowAmount);
+
+        console.log("borrowed Amount ");
 
         // Add liquidity to EulerSwap
         uint256 amount0 = isToken0USDC ? usdcAmount : borrowAmount;
         uint256 amount1 = isToken0USDC ? borrowAmount : usdcAmount;
 
         _addLiquidity(pool, asset0, asset1, amount0, amount1);
+
+        console.log("liquidity added");
 
         // Record position
         positions[pool] = Position({
@@ -210,17 +218,23 @@ contract PositionManager is Roles {
         emit VaultRegistered(token, vault);
     }
 
-    function getTotalValue() public view returns (uint256 totalValue) {
-        for (uint256 i = 0; i < activePositions.length; i++) {
-            Position memory pos = positions[activePositions[i]];
-
-            // Value = LP value - borrowed value
-            uint256 lpValue = _getLPValue(pos.pool);
-            uint256 debtValue = _getDebtValue(pos);
-
-            totalValue += lpValue > debtValue ? lpValue - debtValue : 0;
+   function getTotalValue() public view returns (uint256 totalValue) {
+    // Add any idle USDC in the position manager
+    totalValue = IERC20(usdc).balanceOf(address(this));
+    
+    for (uint256 i = 0; i < activePositions.length; i++) {
+        Position memory pos = positions[activePositions[i]];
+        
+        // For delta-neutral, net value = LP value - debt value
+        uint256 lpValue = _getLPValue(pos);
+        uint256 debtValue = _getDebtValue(pos);
+        
+        // Only add positive values (no underwater positions)
+        if (lpValue > debtValue) {
+            totalValue += lpValue - debtValue;
         }
     }
+}
 
     function getPosition(address pool) external view returns (Position memory) {
         return positions[pool];
@@ -270,20 +284,39 @@ contract PositionManager is Roles {
         emit PositionRebalanced(instruction.pair, currentDelta, 0);
     }
 
-    function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
-        console.log("Inside Add Liquidity", amount0, amount1);
-        console.log("token0 balance in pool", IERC20(token0).balanceOf(pool));
-        console.log("token1 balance in pool", IERC20(token1).balanceOf(pool));
-        // Transfer tokens to pool
-        IERC20(token0).safeTransfer(pool, amount0);
-        // console.log("Transfered token0 to pool");
-        // console.log("token1 balance in pool",IERC20(token1).balanceOf(pool));
-        // console.log("amount1",amount1);
-        IERC20(token1).safeTransfer(pool, amount1);
-        // console.log("Transfered token1 to pool");
+    // function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
+    //     console.log("=========================Inside Add Liquidity========================", amount0, amount1);
+    //     // console.log("token0 balance in pool", IERC20(token0).balanceOf(pool));
+    //     // console.log("token1 balance in pool", IERC20(token1).balanceOf(pool));
+    //     (uint112 reserve0, uint112 reserve1,uint32 blockTimestampLast) = IEulerSwap(pool).getReserves();
+    //     console.log("reserve0", reserve0);
+    //     console.log("reserve1", reserve1);
 
-        // Execute swap with empty data to add liquidity
-        IEulerSwap(pool).swap(0, 0, address(this), "");
+    //     // Transfer tokens to pool
+    //     IERC20(token0).safeTransfer(pool, amount0);
+    //     // console.log("Transfered token0 to pool");
+    //     // console.log("token1 balance in pool",IERC20(token1).balanceOf(pool));
+    //     // console.log("amount1",amount1);
+    //     IERC20(token1).safeTransfer(pool, amount1);
+    //     // console.log("Transfered token1 to pool");
+
+    //     // Execute swap with empty data to add liquidity
+    //     IEulerSwap(pool).swap(0, 0, address(this), "");
+    // }
+
+    function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
+        IEulerSwap.Params memory params = IEulerSwap(pool).getParams();
+
+        // Deposit directly into the Euler vaults
+        if (amount0 > 0) {
+            IERC20(token0).approve(params.vault0, amount0);
+            IEVault(params.vault0).deposit(amount0, params.eulerAccount);
+        }
+
+        if (amount1 > 0) {
+            IERC20(token1).approve(params.vault1, amount1);
+            IEVault(params.vault1).deposit(amount1, params.eulerAccount);
+        }
     }
 
     function _removeLiquidity(address pool, uint256 amount0, uint256 amount1) internal returns (uint256, uint256) {
@@ -307,11 +340,13 @@ contract PositionManager is Roles {
 
         // Enable controller for borrowing
         evc.enableController(eulerAccount, vault);
+        console.log("controller enabled");
 
         // Execute borrow through EVC
         bytes memory data = abi.encodeWithSelector(IBorrowing.borrow.selector, amount, address(this));
 
         evc.call(vault, eulerAccount, 0, data);
+        console.log("borrowed");
     }
 
     function _repayAsset(address token, uint256 amount) internal {
@@ -345,7 +380,7 @@ contract PositionManager is Roles {
 
     function _calculatePositionDelta(Position memory pos) internal view returns (int256 delta, uint256 targetBorrow) {
         // Get current LP value
-        uint256 lpValue = _getLPValue(pos.pool);
+        uint256 lpValue = _getLPValue(pos);
 
         // Calculate current exposure
         uint256 token0Exposure = (lpValue * pos.amount0) / (pos.amount0 + pos.amount1);
@@ -357,29 +392,68 @@ contract PositionManager is Roles {
         targetBorrow = token0Exposure;
     }
 
-    function _getLPValue(address pool) internal view returns (uint256) {
-        IEulerSwap eulerSwap = IEulerSwap(pool);
-        (, uint112 reserve1,) = eulerSwap.getReserves();
-
-        // Simplified: assume reserve1 is USDC
-        return uint256(reserve1) * 2; // Total value is 2x USDC reserves
+    function _getLPValue(Position memory pos) internal view returns (uint256) {
+    IEulerSwap eulerSwap = IEulerSwap(pos.pool);
+    (uint112 reserve0, uint112 reserve1,) = eulerSwap.getReserves();
+    
+    // Get the total LP token supply (this represents total liquidity)
+    // For Euler pools, the LP value is proportional to reserves
+    
+    // Calculate our share of the pool
+    // Our LP tokens = amount0 + amount1 we provided
+    uint256 totalLiquidity = uint256(reserve0) + uint256(reserve1);
+    uint256 ourLiquidity = pos.amount0 + pos.amount1;
+    
+    // Calculate our share of each reserve
+    uint256 ourReserve0 = (uint256(reserve0) * ourLiquidity) / totalLiquidity;
+    uint256 ourReserve1 = (uint256(reserve1) * ourLiquidity) / totalLiquidity;
+    
+    // Convert to USDC value
+    uint256 value0InUsdc;
+    uint256 value1InUsdc;
+    
+    if (pos.token0 == usdc) {
+        value0InUsdc = ourReserve0;
+        // Need to convert token1 to USDC using pool price
+        value1InUsdc = eulerSwap.computeQuote(pos.token1, usdc, ourReserve1, true);
+    } else {
+        // token1 is USDC
+        value1InUsdc = ourReserve1;
+        // Convert token0 to USDC
+        value0InUsdc = eulerSwap.computeQuote(pos.token0, usdc, ourReserve0, true);
     }
+    
+    return value0InUsdc + value1InUsdc;
+}
 
     function _getDebtValue(Position memory pos) internal view returns (uint256) {
-        uint256 debtValue;
-
-        if (pos.borrowed0 > 0) {
+    uint256 debtValue;
+    
+    if (pos.borrowed0 > 0) {
+        if (pos.token0 == usdc) {
+            debtValue += pos.borrowed0;
+        } else {
             // Convert token0 debt to USDC value
             IEulerSwap eulerSwap = IEulerSwap(pos.pool);
             debtValue += eulerSwap.computeQuote(pos.token0, usdc, pos.borrowed0, true);
         }
-
-        if (pos.borrowed1 > 0) {
-            debtValue += pos.borrowed1; // Already in USDC
-        }
-
-        return debtValue;
     }
+    
+    if (pos.borrowed1 > 0) {
+        if (pos.token1 == usdc) {
+            debtValue += pos.borrowed1;
+        } else {
+            // Convert token1 debt to USDC value
+            IEulerSwap eulerSwap = IEulerSwap(pos.pool);
+            debtValue += eulerSwap.computeQuote(pos.token1, usdc, pos.borrowed1, true);
+        }
+    }
+    
+    // Add interest accrued on borrowed amounts
+    // This would need to query the actual debt from Euler vaults
+    // For now, we'll add a small buffer
+    return debtValue * 101 / 100; // 1% buffer for interest
+}
 
     function _checkBorrowHealth(address token, uint256 borrowed) internal view returns (bool) {
         address vault = tokenVaults[token];

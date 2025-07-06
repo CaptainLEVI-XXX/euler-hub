@@ -131,7 +131,7 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
 
     function test_FullFlow_MultipleRebalancesWithVolatility() public {
         // Setup: Large deposit from Charlie
-        uint256 charlieDeposit = 500_000e6;
+        uint256 charlieDeposit = 100e18;
         uint256 charlieShares = depositToVault(charlie, charlieDeposit);
 
         console.log("=== Charlie Initial Deposit ===");
@@ -140,8 +140,8 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
 
         // Open multiple positions
         vm.startPrank(strategist);
-        positionManager.openPosition(address(ethUsdcPool), 200_000e6);
-        positionManager.openPosition(address(btcUsdcPool), 200_000e6);
+        positionManager.openPosition(address(ethUsdcPool), 100e18);
+        positionManager.openPosition(address(btcUsdcPool), 100e18);
         vm.stopPrank();
 
         // Simulate volatile market over 7 days
@@ -187,6 +187,12 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
         console.log("Total assets:", vault.totalAssets());
         // console.log("Total value locked:", positionManager.totalValueLocked);
         console.log("Performance fees:", vault.totalPerformanceFees());
+
+
+        ensureLiquidityForWithdrawal(charlie);
+
+
+        vm.roll(block.number + 12);
 
         // Charlie withdraws
         requestWithdrawal(charlie, charlieShares);

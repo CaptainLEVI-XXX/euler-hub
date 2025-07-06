@@ -137,7 +137,8 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
     function processWithdrawals() external {
         WithdrawalRequest[] storage requests = withdrawalQueue[msg.sender];
         uint256 totalShares;
-        uint256 totalAsset;
+        uint256 totalAssets_;
+
         console.log("Processing withdrawals for:", msg.sender);
         console.log("Total requests:", requests.length);
         console.log("Total shares:", totalSupply());
@@ -149,7 +150,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
                 console.log("Processing withdrawal:", requests[i].shares);
                 console.log("Processing assets:", assets);
                 totalShares += requests[i].shares;
-                totalAsset += assets;
+                totalAssets_ += assets;
                 requests[i].processed = true;
             }
         }
@@ -157,18 +158,38 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
         console.log("Total shares to Burn:", totalShares);
 
         if (totalShares == 0) revert WithdrawalTooEarly();
-        console.log("Total assets to withdraw:", totalAsset);
+        console.log("Total assets to withdraw:", totalAssets_);
+
+        // Check if vault has enough liquidity
+        uint256 availableLiquidity = IERC20(asset()).balanceOf(address(this));
+        if (totalAssets_ > availableLiquidity) {
+            revert InsufficientLiquidity();
+        }
 
         pendingWithdrawals[msg.sender] -= totalShares;
 
         // Burn shares and transfer assets
         _burn(msg.sender, totalShares);
-        console.log("Total assets to transfer:", totalAsset);
-        console.log("Total balance of Vault: ", IERC20(asset()).balanceOf(address(this)));
-        IERC20(asset()).transfer(msg.sender, totalAsset);
-        console.log("Total assets transferred:", totalAsset);
+        console.log("Total assets to transfer:", totalAssets_);
+        console.log("Total balance of Vault: ", availableLiquidity);
+        IERC20(asset()).transfer(msg.sender, totalAssets_);
+        console.log("Total assets transferred:", totalAssets_);
 
-        emit WithdrawalProcessed(msg.sender, totalShares, totalAsset);
+        emit WithdrawalProcessed(msg.sender, totalShares, totalAssets_);
+    }
+
+    // Add a helper function to check if withdrawals can be processed
+    function canProcessWithdrawals(address user) external view returns (bool) {
+        WithdrawalRequest[] storage requests = withdrawalQueue[user];
+        uint256 totalAssetsNeeded;
+
+        for (uint256 i = 0; i < requests.length; i++) {
+            if (!requests[i].processed && block.timestamp >= requests[i].requestTime + WITHDRAWAL_DELAY) {
+                totalAssetsNeeded += convertToAssets(requests[i].shares);
+            }
+        }
+
+        return totalAssetsNeeded <= IERC20(asset()).balanceOf(address(this));
     }
 
     function harvest() external onlyKeeper {
@@ -300,5 +321,12 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
             // Not minting
             require(balanceOf(from) - pendingWithdrawals[from] >= amount, "Shares locked in withdrawal");
         }
+    }
+
+    function totalAssets() public view override returns (uint256) {
+        if (address(positionManager) == address(0)) {
+            return IERC20(asset()).balanceOf(address(this));
+        }
+        return IERC20(asset()).balanceOf(address(this)) + positionManager.getTotalValue();
     }
 }

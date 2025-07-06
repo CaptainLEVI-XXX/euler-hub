@@ -209,6 +209,11 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
             0.9e18 // concentration Y
         );
 
+        (uint112 reserve0ethUSDC, uint112 reserve1ethUSDC, uint32 statusethUSDC) = ethUsdcPool.getReserves();
+        console.log("reserve0 for ETH/USDC pool", reserve0ethUSDC);
+        console.log("reserve1 for ETH/USDC pool", reserve1ethUSDC);
+        console.log("status for ETH/USDC pool", statusethUSDC);
+
         // Store the first pool address
         address firstPool = address(ethUsdcPool);
 
@@ -222,6 +227,11 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
             0.9e18, // concentration X
             0.9e18 // concentration Y
         );
+
+        (uint112 reserve0btcUSDC, uint112 reserve1btcUSDC, uint32 statusbtcUSDC) = btcUsdcPool.getReserves();
+        console.log("reserve0 for BTC/USDC pool", reserve0btcUSDC);
+        console.log("reserve1 for BTC/USDC pool", reserve1btcUSDC);
+        console.log("status for BTC/USDC pool", statusbtcUSDC);
 
         // Now set both pools as operators
         vm.startPrank(holder);
@@ -282,9 +292,39 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         vault.harvest();
     }
 
+    // function simulateYield(uint256 yieldAmount) internal {
+    //     // Simulate yield by sending tokens to position manager
+    //     USDC.mint(address(positionManager), yieldAmount);
+    // }
+
     function simulateYield(uint256 yieldAmount) internal {
-        // Simulate yield by sending tokens to position manager
-        USDC.mint(address(positionManager), yieldAmount);
+        address[] memory activePools = positionManager.getActivePositions();
+        if (activePools.length == 0) return;
+
+        uint256 yieldPerPool = yieldAmount / activePools.length;
+
+        for (uint256 i = 0; i < activePools.length; i++) {
+            // Add USDC to the pool reserves (simulating trading fees)
+            USDC.mint(activePools[i], yieldPerPool);
+        }
+    }
+
+    function simulateYieldThroughRebalance(uint256 yieldAmount) internal {
+        vm.startPrank(strategist);
+
+        // Close a position
+        address[] memory positions = positionManager.getActivePositions();
+        if (positions.length > 0) {
+            positionManager.closePosition(positions[0]);
+
+            // Mint extra USDC to position manager (profit)
+            USDC.mint(address(positionManager), yieldAmount);
+
+            // Reopen position with more funds
+            positionManager.openPosition(positions[0], USDC.balanceOf(address(positionManager)));
+        }
+
+        vm.stopPrank();
     }
 
     function movePrice(address token, uint256 newPrice) internal {
@@ -298,4 +338,22 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
     function skipTime(uint256 duration) internal {
         skip(duration);
     }
+
+    function ensureLiquidityForWithdrawal(address user) internal {
+    uint256 sharesOwned = vault.balanceOf(user);
+    uint256 assetsNeeded = vault.convertToAssets(sharesOwned);
+    uint256 currentLiquidity = USDC.balanceOf(address(vault));
+    
+    if (assetsNeeded > currentLiquidity) {
+        // Close enough positions to meet withdrawal
+        vm.startPrank(strategist);
+        address[] memory positions = positionManager.getActivePositions();
+        
+        for (uint i = 0; i < positions.length && currentLiquidity < assetsNeeded; i++) {
+            positionManager.closePosition(positions[i]);
+            currentLiquidity = USDC.balanceOf(address(vault));
+        }
+        vm.stopPrank();
+    }
+}
 }
