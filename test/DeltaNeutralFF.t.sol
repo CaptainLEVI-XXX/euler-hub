@@ -9,7 +9,6 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
         // Initial state tracking
         uint256 initialAliceBalance = USDC.balanceOf(alice);
         uint256 initialBobBalance = USDC.balanceOf(bob);
-        uint256 initialVaultAssets = USDC.balanceOf(address(vault));
 
         console.log("=== Initial State ===");
         console.log("Alice USDC balance:", initialAliceBalance);
@@ -37,8 +36,6 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
         // Step 2: Open positions through rebalancing
         vm.prank(strategist);
         positionManager.openPosition(address(ethUsdcPool), 75_000e6); // Deploy half to ETH/USDC
-
-        console.log("\n=== After Opening ETH/USDC Position ===");
 
         // Verify positions were opened
         address[] memory activePositions = positionManager.getActivePositions();
@@ -97,6 +94,9 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
         // 181818181849421622805264
         // 4000000000000002974325004
         // 2750000000
+
+        ensureLiquidityForWithdrawal(alice);
+        ensureLiquidityForWithdrawal(bob);
 
         processWithdrawal(alice);
         processWithdrawal(bob);
@@ -181,10 +181,6 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
             skipTime(1 days);
         }
 
-        //9900000000000000000000
-        //9899999999999999999902
-        //5 000 000 000 000 000 000
-
         // Harvest accumulated fees
         harvest();
 
@@ -202,7 +198,6 @@ contract DeltaNeutralVaultFullFlowTest is DeltaNeutralVaultTestBase {
         skipTime(25 hours);
 
         uint256 charlieBalanceBefore = USDC.balanceOf(charlie);
-        vm.expectRevert();
         processWithdrawal(charlie);
         uint256 charlieBalanceAfter = USDC.balanceOf(charlie);
 

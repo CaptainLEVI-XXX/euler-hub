@@ -113,7 +113,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
         _collectManagementFees();
 
         shares = super.deposit(assets, receiver);
-        console.log("shares minted: ", shares);
+        // console.log("shares minted: ", shares);
 
         // Deploy capital immediately if strategy is set
         if (address(positionManager) != address(0)) {
@@ -135,7 +135,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
         emit WithdrawalQueued(msg.sender, shares, withdrawalQueue[msg.sender].length - 1);
     }
 
-    function processWithdrawals() external {
+    function processWithdrawals() external whenNotPaused {
         WithdrawalRequest[] storage requests = withdrawalQueue[msg.sender];
         uint256 totalShares;
         uint256 totalAssets_;
@@ -267,18 +267,6 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
     function unpause() external onlyAdmin {
         _unpause();
     }
-
-    // function totalAssets() public view override returns (uint256) {
-    //     if (address(positionManager) == address(0)) {
-    //         return IERC20(asset()).balanceOf(address(this));
-    //     }
-
-    //     return IERC20(asset()).balanceOf(address(this)) + positionManager.getTotalValue();
-    // }
-
-    // function getTotalUserBalance(address user) external view returns (uint256) {
-    //     return balanceOf(user) + pendingWithdrawals[user];
-    // }
 
     function getCurrentDelta() external view returns (int256) {
         if (address(strategyEngine) == address(0)) return 0;

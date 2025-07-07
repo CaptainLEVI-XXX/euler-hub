@@ -6,7 +6,7 @@ import {SafeERC20} from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol"
 import {AccessControl} from "openzeppelin-contracts/access/AccessControl.sol";
 
 import {IEVC} from "evc/interfaces/IEthereumVaultConnector.sol";
-import {IEVault, IBorrowing} from "evk/EVault/IEVault.sol";
+import {IEVault, IBorrowing, IERC4626} from "evk/EVault/IEVault.sol";
 import {IEulerSwap} from "./interfaces/IEulerSwap.sol";
 import {IEulerSwapFactory} from "./interfaces/IEulerSwapFactory.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
@@ -125,7 +125,6 @@ contract PositionManager is Roles {
         bool isToken0USDC = asset0 == usdc;
         address borrowToken = isToken0USDC ? asset1 : asset0;
 
-        // CRITICAL FIX: Deposit USDC as collateral BEFORE borrowing
         address usdcVault = tokenVaults[usdc];
         require(usdcVault != address(0), "USDC vault not registered");
 
@@ -143,11 +142,11 @@ contract PositionManager is Roles {
         address borrowVault = tokenVaults[borrowToken];
         evc.enableController(eulerAccount, borrowVault);
 
-        // Now borrow - this should work because we have collateral
+        // Now borrow 
         bytes memory borrowData = abi.encodeWithSelector(IBorrowing.borrow.selector, borrowAmount, address(this));
         evc.call(borrowVault, eulerAccount, 0, borrowData);
 
-        // Don't try to add liquidity to EulerSwap - just hold the assets
+
         // Record position
         positions[pool] = Position({
             pool: pool,
@@ -172,15 +171,39 @@ contract PositionManager is Roles {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) revert PositionNotFound();
 
-        // Remove liquidity
-        // (uint256 amount0, uint256 amount1) = _removeLiquidity(pool, pos.amount0, pos.amount1);
-
-        // Repay borrowed amounts
+        // 1. Repay borrowed amounts first
         if (pos.borrowed0 > 0) {
             _repayAsset(pos.token0, pos.borrowed0);
         }
         if (pos.borrowed1 > 0) {
             _repayAsset(pos.token1, pos.borrowed1);
+        }
+
+        // 2. Withdraw USDC collateral from Euler
+        address usdcVault = tokenVaults[usdc];
+        uint256 shares = IEVault(usdcVault).balanceOf(eulerAccount);
+        if (shares > 0) {
+            uint256 assets = IEVault(usdcVault).convertToAssets(shares);
+
+            // Withdraw through EVC
+            bytes memory withdrawData =
+                abi.encodeWithSelector(IERC4626.withdraw.selector, assets, address(this), eulerAccount);
+            evc.call(usdcVault, eulerAccount, 0, withdrawData);
+        }
+
+        // 3. Transfer all USDC back to vault
+        uint256 usdcBalance = IERC20(usdc).balanceOf(address(this));
+        if (usdcBalance > 0) {
+            IERC20(usdc).safeTransfer(vault, usdcBalance);
+        }
+
+        // 4. Handle any remaining borrowed assets (profit/loss from price movements)
+        if (pos.token1 != usdc) {
+            uint256 token1Balance = IERC20(pos.token1).balanceOf(address(this));
+            if (token1Balance > 0) {
+                // Could swap to USDC here, or just transfer to vault
+                IERC20(pos.token1).safeTransfer(vault, token1Balance);
+            }
         }
 
         // Clean up position
@@ -316,56 +339,6 @@ contract PositionManager is Roles {
         emit PositionRebalanced(instruction.pair, currentDelta, 0);
     }
 
-    // function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
-    //     console.log("=========================Inside Add Liquidity========================", amount0, amount1);
-    //     // console.log("token0 balance in pool", IERC20(token0).balanceOf(pool));
-    //     // console.log("token1 balance in pool", IERC20(token1).balanceOf(pool));
-    //     (uint112 reserve0, uint112 reserve1,uint32 blockTimestampLast) = IEulerSwap(pool).getReserves();
-    //     console.log("reserve0", reserve0);
-    //     console.log("reserve1", reserve1);
-
-    //     // Transfer tokens to pool
-    //     IERC20(token0).safeTransfer(pool, amount0);
-    //     // console.log("Transfered token0 to pool");
-    //     // console.log("token1 balance in pool",IERC20(token1).balanceOf(pool));
-    //     // console.log("amount1",amount1);
-    //     IERC20(token1).safeTransfer(pool, amount1);
-    //     // console.log("Transfered token1 to pool");
-
-    //     // Execute swap with empty data to add liquidity
-    //     IEulerSwap(pool).swap(0, 0, address(this), "");
-    // }
-
-    function _addLiquidity(address pool, address token0, address token1, uint256 amount0, uint256 amount1) internal {
-        IEulerSwap.Params memory params = IEulerSwap(pool).getParams();
-
-        // Deposit directly into the Euler vaults
-        if (amount0 > 0) {
-            IERC20(token0).approve(params.vault0, amount0);
-            IEVault(params.vault0).deposit(amount0, params.eulerAccount);
-        }
-
-        if (amount1 > 0) {
-            IERC20(token1).approve(params.vault1, amount1);
-            IEVault(params.vault1).deposit(amount1, params.eulerAccount);
-        }
-    }
-
-    function _removeLiquidity(address pool, uint256 amount0, uint256 amount1) internal returns (uint256, uint256) {
-        IEulerSwap eulerSwap = IEulerSwap(pool);
-
-        // Calculate amounts to withdraw
-        (uint112 reserve0, uint112 reserve1,) = eulerSwap.getReserves();
-
-        uint256 withdraw0 = (amount0 * reserve0) / (amount0 + amount1);
-        uint256 withdraw1 = (amount1 * reserve1) / (amount0 + amount1);
-
-        // Execute withdrawal
-        eulerSwap.swap(withdraw0, withdraw1, address(this), "");
-
-        return (withdraw0, withdraw1);
-    }
-
     function _borrowAsset(address token, uint256 amount) internal {
         address vault = tokenVaults[token];
         if (vault == address(0)) revert VaultNotRegistered();
@@ -397,7 +370,7 @@ contract PositionManager is Roles {
         }
     }
 
-    // Also fix _calculateBorrowAmount to use oracle prices correctly:
+    //  _calculateBorrowAmount to use oracle prices :
     function _calculateBorrowAmount(address borrowToken, uint256 usdcAmount, address) internal view returns (uint256) {
         // Get price from oracle (not from pool)
         uint256 tokenPrice = IPriceOracle(address(priceOracle)).getPrice(borrowToken);

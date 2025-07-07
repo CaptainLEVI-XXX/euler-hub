@@ -77,7 +77,7 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         volatilityOracle = new MockVolatilityOracle();
         accessRegistry = new AccessRegistry(admin_);
 
-        console.log("deployed mock contracts");
+        // console.log("deployed mock contracts");
 
         vm.startPrank(admin_);
 
@@ -88,21 +88,15 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         accessRegistry.grantRole(GUARDIAN_ROLE, guardian);
         vm.stopPrank();
 
-        console.log("granted roles");
-
         // Set up oracle prices
         priceOracle.setPrice(address(USDC), INITIAL_PRICE_USDC);
         priceOracle.setPrice(address(ETH), INITIAL_PRICE_ETH);
         priceOracle.setPrice(address(BTC), INITIAL_PRICE_BTC);
 
-        console.log("set up oracle prices");
-
         // Set up volatilities (20% for ETH/BTC, 1% for USDC)
         volatilityOracle.setVolatility(address(ETH), 20e16);
         volatilityOracle.setVolatility(address(BTC), 25e16);
         volatilityOracle.setVolatility(address(USDC), 1e16);
-
-        console.log("set up volatilities");
 
         // Deploy Delta-Neutral Vault protocol
         vault = new DeltaNeutralVault(
@@ -136,8 +130,6 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         strategyEngine =
             new StrategyEngine(address(vault), address(positionManager), address(priceOracle), address(accessRegistry));
 
-        console.log("deployed delta-neutral vault protocol");
-
         // Set up operators for EVC - this is crucial
         vm.startPrank(holder);
         // Allow PositionManager to act on behalf of holder
@@ -149,24 +141,15 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         // Configure vault components
         vm.startPrank(admin_);
         vault.setPositionManager(address(positionManager));
-        console.log("set position manager");
         vault.setRiskManager(address(riskManager));
-        console.log("set risk manager");
         vault.setStrategyEngine(address(strategyEngine));
-        console.log("set strategy engine");
         vm.stopPrank();
-
-        console.log("configured vault components");
 
         // Create Euler Swap pools using base helper
         createDeltaNeutralPools();
 
-        console.log("created euler swap pools");
-
         // Fund test accounts
         fundTestAccounts();
-
-        console.log("funded test accounts");
 
         // Register vaults in position manager
         vm.startPrank(admin_);
@@ -180,8 +163,6 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         accessRegistry.grantRole(VAULT_ROLE, address(riskManager));
         accessRegistry.grantRole(VAULT_ROLE, address(strategyEngine));
         vm.stopPrank();
-
-        console.log("registered vaults in position manager");
 
         // Whitelist pools in strategy engine
         vm.startPrank(strategist);
@@ -210,11 +191,6 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
             0.9e18 // concentration Y
         );
 
-        (uint112 reserve0ethUSDC, uint112 reserve1ethUSDC, uint32 statusethUSDC) = ethUsdcPool.getReserves();
-        console.log("reserve0 for ETH/USDC pool", reserve0ethUSDC);
-        console.log("reserve1 for ETH/USDC pool", reserve1ethUSDC);
-        console.log("status for ETH/USDC pool", statusethUSDC);
-
         // Store the first pool address
         address firstPool = address(ethUsdcPool);
 
@@ -228,11 +204,6 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
             0.9e18, // concentration X
             0.9e18 // concentration Y
         );
-
-        (uint112 reserve0btcUSDC, uint112 reserve1btcUSDC, uint32 statusbtcUSDC) = btcUsdcPool.getReserves();
-        console.log("reserve0 for BTC/USDC pool", reserve0btcUSDC);
-        console.log("reserve1 for BTC/USDC pool", reserve1btcUSDC);
-        console.log("status for BTC/USDC pool", statusbtcUSDC);
 
         // Now set both pools as operators
         vm.startPrank(holder);
@@ -292,11 +263,6 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
         vm.prank(keeper);
         vault.harvest();
     }
-
-    // function simulateYield(uint256 yieldAmount) internal {
-    //     // Simulate yield by sending tokens to position manager
-    //     USDC.mint(address(positionManager), yieldAmount);
-    // }
 
     function simulateYield(uint256 yieldAmount) internal {
         address[] memory activePools = positionManager.getActivePositions();
