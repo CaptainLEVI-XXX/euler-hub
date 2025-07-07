@@ -113,6 +113,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
         _collectManagementFees();
 
         shares = super.deposit(assets, receiver);
+        console.log("shares minted: ", shares);
 
         // Deploy capital immediately if strategy is set
         if (address(positionManager) != address(0)) {
@@ -162,6 +163,7 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
 
         // Check if vault has enough liquidity
         uint256 availableLiquidity = IERC20(asset()).balanceOf(address(this));
+        console.log("Available liquidity:", availableLiquidity);
         if (totalAssets_ > availableLiquidity) {
             revert InsufficientLiquidity();
         }

@@ -121,7 +121,8 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
             address(eulerSwapFactory),
             holder, // Use holder from base as euler account
             address(USDC),
-            address(accessRegistry)
+            address(accessRegistry),
+            address(priceOracle)
         );
 
         riskManager = new RiskManager(
@@ -340,20 +341,20 @@ contract DeltaNeutralVaultTestBase is EulerSwapTestBase {
     }
 
     function ensureLiquidityForWithdrawal(address user) internal {
-    uint256 sharesOwned = vault.balanceOf(user);
-    uint256 assetsNeeded = vault.convertToAssets(sharesOwned);
-    uint256 currentLiquidity = USDC.balanceOf(address(vault));
-    
-    if (assetsNeeded > currentLiquidity) {
-        // Close enough positions to meet withdrawal
-        vm.startPrank(strategist);
-        address[] memory positions = positionManager.getActivePositions();
-        
-        for (uint i = 0; i < positions.length && currentLiquidity < assetsNeeded; i++) {
-            positionManager.closePosition(positions[i]);
-            currentLiquidity = USDC.balanceOf(address(vault));
+        uint256 sharesOwned = vault.balanceOf(user);
+        uint256 assetsNeeded = vault.convertToAssets(sharesOwned);
+        uint256 currentLiquidity = USDC.balanceOf(address(vault));
+
+        if (assetsNeeded > currentLiquidity) {
+            // Close enough positions to meet withdrawal
+            vm.startPrank(strategist);
+            address[] memory positions = positionManager.getActivePositions();
+
+            for (uint256 i = 0; i < positions.length && currentLiquidity < assetsNeeded; i++) {
+                positionManager.closePosition(positions[i]);
+                currentLiquidity = USDC.balanceOf(address(vault));
+            }
+            vm.stopPrank();
         }
-        vm.stopPrank();
     }
-}
 }

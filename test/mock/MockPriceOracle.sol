@@ -1,8 +1,9 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.27;
 
-// Mock contracts for testing
-contract MockPriceOracle {
+import {IPriceOracle} from "../../src/interfaces/IOracle.sol";
+
+contract MockPriceOracle is IPriceOracle {
     mapping(address => uint256) public prices;
     mapping(address => bool) public manipulated;
 
@@ -11,6 +12,7 @@ contract MockPriceOracle {
     }
 
     function getPrice(address token) external view returns (uint256) {
+        require(prices[token] > 0, "Price not set");
         return prices[token];
     }
 
@@ -18,7 +20,7 @@ contract MockPriceOracle {
         return manipulated[token];
     }
 
-    function setManipulated(address token, bool _manipulated) external {
-        manipulated[token] = _manipulated;
+    function getTwapPrice(address token, uint256) external view returns (uint256) {
+        return prices[token];
     }
 }

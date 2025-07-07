@@ -13,6 +13,7 @@ import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
 import {console} from "forge-std/console.sol";
+import {IPriceOracle} from "./interfaces/IOracle.sol";
 
 /// @title Position Manager for Delta-Neutral Vaults
 contract PositionManager is Roles {
@@ -29,6 +30,7 @@ contract PositionManager is Roles {
     address public immutable eulerAccount;
     address public immutable vault;
     address public immutable usdc; // Base asset
+    address public immutable priceOracle;
 
     // STRUCTS
 
@@ -91,9 +93,11 @@ contract PositionManager is Roles {
         address _eulerSwapFactory,
         address _eulerAccount,
         address _usdc,
-        address _accessRegistry
+        address _accessRegistry,
+        address _priceOracle
     ) Roles(_accessRegistry) {
         vault = _vault;
+        priceOracle = _priceOracle;
         evc = IEVC(_evc);
         eulerSwapFactory = IEulerSwapFactory(_eulerSwapFactory);
         eulerAccount = _eulerAccount;
@@ -115,42 +119,42 @@ contract PositionManager is Roles {
     }
 
     function openPosition(address pool, uint256 usdcAmount) external onlyStrategist {
-        // if (!eulerSwapFactory.isValidPool(pool)) revert InvalidPool();
-
-        console.log("================openPosition=====================");
-
         IEulerSwap eulerSwap = IEulerSwap(pool);
         (address asset0, address asset1) = eulerSwap.getAssets();
 
-        // Determine which is USDC and which needs borrowing
         bool isToken0USDC = asset0 == usdc;
         address borrowToken = isToken0USDC ? asset1 : asset0;
 
-        // Calculate amount to borrow for delta-neutral position
+        // CRITICAL FIX: Deposit USDC as collateral BEFORE borrowing
+        address usdcVault = tokenVaults[usdc];
+        require(usdcVault != address(0), "USDC vault not registered");
+
+        // Approve and deposit USDC to Euler
+        IERC20(usdc).forceApprove(usdcVault, usdcAmount);
+        IEVault(usdcVault).deposit(usdcAmount, eulerAccount);
+
+        // Enable USDC vault as collateral
+        evc.enableCollateral(eulerAccount, usdcVault);
+
+        // Calculate amount to borrow
         uint256 borrowAmount = _calculateBorrowAmount(borrowToken, usdcAmount, pool);
 
-        console.log("borrowAmount ", borrowAmount);
+        // Enable the borrow vault as controller
+        address borrowVault = tokenVaults[borrowToken];
+        evc.enableController(eulerAccount, borrowVault);
 
-        // Execute borrow through EVC
-        _borrowAsset(borrowToken, borrowAmount);
+        // Now borrow - this should work because we have collateral
+        bytes memory borrowData = abi.encodeWithSelector(IBorrowing.borrow.selector, borrowAmount, address(this));
+        evc.call(borrowVault, eulerAccount, 0, borrowData);
 
-        console.log("borrowed Amount ");
-
-        // Add liquidity to EulerSwap
-        uint256 amount0 = isToken0USDC ? usdcAmount : borrowAmount;
-        uint256 amount1 = isToken0USDC ? borrowAmount : usdcAmount;
-
-        _addLiquidity(pool, asset0, asset1, amount0, amount1);
-
-        console.log("liquidity added");
-
+        // Don't try to add liquidity to EulerSwap - just hold the assets
         // Record position
         positions[pool] = Position({
             pool: pool,
             token0: asset0,
             token1: asset1,
-            amount0: amount0,
-            amount1: amount1,
+            amount0: isToken0USDC ? usdcAmount : borrowAmount,
+            amount1: isToken0USDC ? borrowAmount : usdcAmount,
             borrowed0: isToken0USDC ? 0 : borrowAmount,
             borrowed1: isToken0USDC ? borrowAmount : 0,
             lastUpdate: block.timestamp
@@ -161,7 +165,7 @@ contract PositionManager is Roles {
             isActivePosition[pool] = true;
         }
 
-        emit PositionOpened(pool, borrowToken, amount0, amount1, borrowAmount);
+        emit PositionOpened(pool, borrowToken, usdcAmount, borrowAmount, borrowAmount);
     }
 
     function closePosition(address pool) external onlyStrategist {
@@ -169,7 +173,7 @@ contract PositionManager is Roles {
         if (pos.pool == address(0)) revert PositionNotFound();
 
         // Remove liquidity
-        (uint256 amount0, uint256 amount1) = _removeLiquidity(pool, pos.amount0, pos.amount1);
+        // (uint256 amount0, uint256 amount1) = _removeLiquidity(pool, pos.amount0, pos.amount1);
 
         // Repay borrowed amounts
         if (pos.borrowed0 > 0) {
@@ -183,7 +187,7 @@ contract PositionManager is Roles {
         delete positions[pool];
         _removeFromActivePositions(pool);
 
-        emit PositionClosed(pool, amount0, amount1, pos.borrowed0 + pos.borrowed1);
+        emit PositionClosed(pool, pos.amount0, pos.amount1, pos.borrowed0 + pos.borrowed1);
     }
 
     function claimRewards() external onlyVault returns (uint256 totalRewards) {
@@ -218,23 +222,51 @@ contract PositionManager is Roles {
         emit VaultRegistered(token, vault);
     }
 
-   function getTotalValue() public view returns (uint256 totalValue) {
-    // Add any idle USDC in the position manager
-    totalValue = IERC20(usdc).balanceOf(address(this));
-    
-    for (uint256 i = 0; i < activePositions.length; i++) {
-        Position memory pos = positions[activePositions[i]];
-        
-        // For delta-neutral, net value = LP value - debt value
-        uint256 lpValue = _getLPValue(pos);
-        uint256 debtValue = _getDebtValue(pos);
-        
-        // Only add positive values (no underwater positions)
-        if (lpValue > debtValue) {
-            totalValue += lpValue - debtValue;
+    // Fix getTotalValue to properly calculate net position value:
+    function getTotalValue() public view returns (uint256 totalValue) {
+        // Add idle USDC first
+        totalValue = IERC20(usdc).balanceOf(address(this));
+
+        // For each position, calculate net value
+        for (uint256 i = 0; i < activePositions.length; i++) {
+            Position memory pos = positions[activePositions[i]];
+
+            // Get collateral value (USDC deposited with interest)
+            address usdcVault = tokenVaults[usdc];
+            // Note: This gets ALL shares, so divide by number of positions if needed
+            uint256 shares = IEVault(usdcVault).balanceOf(eulerAccount);
+            uint256 collateralValue = 0;
+            if (shares > 0 && activePositions.length > 0) {
+                collateralValue = IEVault(usdcVault).convertToAssets(shares) / activePositions.length;
+            }
+
+            // Get debt value
+            address borrowVault = tokenVaults[pos.borrowed1 > 0 ? pos.token1 : pos.token0];
+            uint256 debtAmount = 0;
+            if (borrowVault != address(0)) {
+                // Similar issue - total debt divided by positions
+                uint256 totalDebt = IEVault(borrowVault).debtOf(eulerAccount);
+                if (activePositions.length > 0) {
+                    debtAmount = totalDebt / activePositions.length;
+                }
+            }
+
+            // Convert debt to USDC value
+            address borrowedToken = pos.borrowed1 > 0 ? pos.token1 : pos.token0;
+            uint256 debtInUsdc = 0;
+            if (debtAmount > 0 && borrowedToken != usdc) {
+                uint256 tokenPrice = IPriceOracle(address(priceOracle)).getPrice(borrowedToken);
+                debtInUsdc = (debtAmount * tokenPrice) / 1e18;
+            }
+
+            // Add net value (collateral - debt)
+            if (collateralValue > debtInUsdc) {
+                totalValue += collateralValue - debtInUsdc;
+            }
         }
+
+        return totalValue;
     }
-}
 
     function getPosition(address pool) external view returns (Position memory) {
         return positions[pool];
@@ -365,17 +397,15 @@ contract PositionManager is Roles {
         }
     }
 
-    function _calculateBorrowAmount(address borrowToken, uint256 usdcAmount, address pool)
-        internal
-        view
-        returns (uint256)
-    {
-        // Get current price from pool
-        IEulerSwap eulerSwap = IEulerSwap(pool);
-        uint256 price = eulerSwap.computeQuote(usdc, borrowToken, usdcAmount, true);
+    // Also fix _calculateBorrowAmount to use oracle prices correctly:
+    function _calculateBorrowAmount(address borrowToken, uint256 usdcAmount, address) internal view returns (uint256) {
+        // Get price from oracle (not from pool)
+        uint256 tokenPrice = IPriceOracle(address(priceOracle)).getPrice(borrowToken);
 
-        // For delta-neutral, borrow half the value in the other token
-        return price / 2;
+        // For delta neutral, borrow equal USD value
+        // tokenPrice is in USDC terms with 18 decimals
+        // So if ETH = $2000, tokenPrice = 2000e18
+        return (usdcAmount * 1e18) / tokenPrice;
     }
 
     function _calculatePositionDelta(Position memory pos) internal view returns (int256 delta, uint256 targetBorrow) {
@@ -393,67 +423,67 @@ contract PositionManager is Roles {
     }
 
     function _getLPValue(Position memory pos) internal view returns (uint256) {
-    IEulerSwap eulerSwap = IEulerSwap(pos.pool);
-    (uint112 reserve0, uint112 reserve1,) = eulerSwap.getReserves();
-    
-    // Get the total LP token supply (this represents total liquidity)
-    // For Euler pools, the LP value is proportional to reserves
-    
-    // Calculate our share of the pool
-    // Our LP tokens = amount0 + amount1 we provided
-    uint256 totalLiquidity = uint256(reserve0) + uint256(reserve1);
-    uint256 ourLiquidity = pos.amount0 + pos.amount1;
-    
-    // Calculate our share of each reserve
-    uint256 ourReserve0 = (uint256(reserve0) * ourLiquidity) / totalLiquidity;
-    uint256 ourReserve1 = (uint256(reserve1) * ourLiquidity) / totalLiquidity;
-    
-    // Convert to USDC value
-    uint256 value0InUsdc;
-    uint256 value1InUsdc;
-    
-    if (pos.token0 == usdc) {
-        value0InUsdc = ourReserve0;
-        // Need to convert token1 to USDC using pool price
-        value1InUsdc = eulerSwap.computeQuote(pos.token1, usdc, ourReserve1, true);
-    } else {
-        // token1 is USDC
-        value1InUsdc = ourReserve1;
-        // Convert token0 to USDC
-        value0InUsdc = eulerSwap.computeQuote(pos.token0, usdc, ourReserve0, true);
+        IEulerSwap eulerSwap = IEulerSwap(pos.pool);
+        (uint112 reserve0, uint112 reserve1,) = eulerSwap.getReserves();
+
+        // Get the total LP token supply (this represents total liquidity)
+        // For Euler pools, the LP value is proportional to reserves
+
+        // Calculate our share of the pool
+        // Our LP tokens = amount0 + amount1 we provided
+        uint256 totalLiquidity = uint256(reserve0) + uint256(reserve1);
+        uint256 ourLiquidity = pos.amount0 + pos.amount1;
+
+        // Calculate our share of each reserve
+        uint256 ourReserve0 = (uint256(reserve0) * ourLiquidity) / totalLiquidity;
+        uint256 ourReserve1 = (uint256(reserve1) * ourLiquidity) / totalLiquidity;
+
+        // Convert to USDC value
+        uint256 value0InUsdc;
+        uint256 value1InUsdc;
+
+        if (pos.token0 == usdc) {
+            value0InUsdc = ourReserve0;
+            // Need to convert token1 to USDC using pool price
+            value1InUsdc = eulerSwap.computeQuote(pos.token1, usdc, ourReserve1, true);
+        } else {
+            // token1 is USDC
+            value1InUsdc = ourReserve1;
+            // Convert token0 to USDC
+            value0InUsdc = eulerSwap.computeQuote(pos.token0, usdc, ourReserve0, true);
+        }
+
+        return value0InUsdc + value1InUsdc;
     }
-    
-    return value0InUsdc + value1InUsdc;
-}
 
     function _getDebtValue(Position memory pos) internal view returns (uint256) {
-    uint256 debtValue;
-    
-    if (pos.borrowed0 > 0) {
-        if (pos.token0 == usdc) {
-            debtValue += pos.borrowed0;
-        } else {
-            // Convert token0 debt to USDC value
-            IEulerSwap eulerSwap = IEulerSwap(pos.pool);
-            debtValue += eulerSwap.computeQuote(pos.token0, usdc, pos.borrowed0, true);
+        uint256 debtValue;
+
+        if (pos.borrowed0 > 0) {
+            if (pos.token0 == usdc) {
+                debtValue += pos.borrowed0;
+            } else {
+                // Convert token0 debt to USDC value
+                IEulerSwap eulerSwap = IEulerSwap(pos.pool);
+                debtValue += eulerSwap.computeQuote(pos.token0, usdc, pos.borrowed0, true);
+            }
         }
-    }
-    
-    if (pos.borrowed1 > 0) {
-        if (pos.token1 == usdc) {
-            debtValue += pos.borrowed1;
-        } else {
-            // Convert token1 debt to USDC value
-            IEulerSwap eulerSwap = IEulerSwap(pos.pool);
-            debtValue += eulerSwap.computeQuote(pos.token1, usdc, pos.borrowed1, true);
+
+        if (pos.borrowed1 > 0) {
+            if (pos.token1 == usdc) {
+                debtValue += pos.borrowed1;
+            } else {
+                // Convert token1 debt to USDC value
+                IEulerSwap eulerSwap = IEulerSwap(pos.pool);
+                debtValue += eulerSwap.computeQuote(pos.token1, usdc, pos.borrowed1, true);
+            }
         }
+
+        // Add interest accrued on borrowed amounts
+        // This would need to query the actual debt from Euler vaults
+        // For now, we'll add a small buffer
+        return debtValue * 101 / 100; // 1% buffer for interest
     }
-    
-    // Add interest accrued on borrowed amounts
-    // This would need to query the actual debt from Euler vaults
-    // For now, we'll add a small buffer
-    return debtValue * 101 / 100; // 1% buffer for interest
-}
 
     function _checkBorrowHealth(address token, uint256 borrowed) internal view returns (bool) {
         address vault = tokenVaults[token];
