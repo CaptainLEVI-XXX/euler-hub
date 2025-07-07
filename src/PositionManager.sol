@@ -142,10 +142,9 @@ contract PositionManager is Roles {
         address borrowVault = tokenVaults[borrowToken];
         evc.enableController(eulerAccount, borrowVault);
 
-        // Now borrow 
+        // Now borrow
         bytes memory borrowData = abi.encodeWithSelector(IBorrowing.borrow.selector, borrowAmount, address(this));
         evc.call(borrowVault, eulerAccount, 0, borrowData);
-
 
         // Record position
         positions[pool] = Position({
@@ -171,7 +170,7 @@ contract PositionManager is Roles {
         Position memory pos = positions[pool];
         if (pos.pool == address(0)) revert PositionNotFound();
 
-        // 1. Repay borrowed amounts first
+        // Repay borrowed amounts first
         if (pos.borrowed0 > 0) {
             _repayAsset(pos.token0, pos.borrowed0);
         }
@@ -179,7 +178,7 @@ contract PositionManager is Roles {
             _repayAsset(pos.token1, pos.borrowed1);
         }
 
-        // 2. Withdraw USDC collateral from Euler
+        // Withdraw USDC collateral from Euler
         address usdcVault = tokenVaults[usdc];
         uint256 shares = IEVault(usdcVault).balanceOf(eulerAccount);
         if (shares > 0) {
@@ -191,13 +190,13 @@ contract PositionManager is Roles {
             evc.call(usdcVault, eulerAccount, 0, withdrawData);
         }
 
-        // 3. Transfer all USDC back to vault
+        // Transfer all USDC back to vault
         uint256 usdcBalance = IERC20(usdc).balanceOf(address(this));
         if (usdcBalance > 0) {
             IERC20(usdc).safeTransfer(vault, usdcBalance);
         }
 
-        // 4. Handle any remaining borrowed assets (profit/loss from price movements)
+        // Handle any remaining borrowed assets (profit/loss from price movements)
         if (pos.token1 != usdc) {
             uint256 token1Balance = IERC20(pos.token1).balanceOf(address(this));
             if (token1Balance > 0) {
@@ -245,9 +244,8 @@ contract PositionManager is Roles {
         emit VaultRegistered(token, vault);
     }
 
-    // Fix getTotalValue to properly calculate net position value:
+    // getTotalValue to  calculate net position value:
     function getTotalValue() public view returns (uint256 totalValue) {
-        // Add idle USDC first
         totalValue = IERC20(usdc).balanceOf(address(this));
 
         // For each position, calculate net value
@@ -267,7 +265,6 @@ contract PositionManager is Roles {
             address borrowVault = tokenVaults[pos.borrowed1 > 0 ? pos.token1 : pos.token0];
             uint256 debtAmount = 0;
             if (borrowVault != address(0)) {
-                // Similar issue - total debt divided by positions
                 uint256 totalDebt = IEVault(borrowVault).debtOf(eulerAccount);
                 if (activePositions.length > 0) {
                     debtAmount = totalDebt / activePositions.length;
@@ -370,14 +367,12 @@ contract PositionManager is Roles {
         }
     }
 
-    //  _calculateBorrowAmount to use oracle prices :
+    //  _calculateBorrowAmount:
     function _calculateBorrowAmount(address borrowToken, uint256 usdcAmount, address) internal view returns (uint256) {
-        // Get price from oracle (not from pool)
+        // Get price from oracle
         uint256 tokenPrice = IPriceOracle(address(priceOracle)).getPrice(borrowToken);
 
         // For delta neutral, borrow equal USD value
-        // tokenPrice is in USDC terms with 18 decimals
-        // So if ETH = $2000, tokenPrice = 2000e18
         return (usdcAmount * 1e18) / tokenPrice;
     }
 

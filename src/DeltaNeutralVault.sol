@@ -16,7 +16,6 @@ import {IStrategyEngine} from "./interfaces/IStrategyEngine.sol";
 import {CustomRevert} from "./libraries/CustomRevert.sol";
 import {Lock} from "./libraries/Lock.sol";
 import {Roles} from "./abstract/Roles.sol";
-import {console} from "forge-std/console.sol";
 
 /// @title Delta-Neutral Pooled Vault
 contract DeltaNeutralVault is ERC4626, Pausable, Roles {
@@ -140,30 +139,19 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
         uint256 totalShares;
         uint256 totalAssets_;
 
-        console.log("Processing withdrawals for:", msg.sender);
-        console.log("Total requests:", requests.length);
-        console.log("Total shares:", totalSupply());
-        console.log("TOTAL ASSETS:", totalAssets());
-
         for (uint256 i = 0; i < requests.length; i++) {
             if (!requests[i].processed && block.timestamp >= requests[i].requestTime + WITHDRAWAL_DELAY) {
                 uint256 assets = convertToAssets(requests[i].shares);
-                console.log("Processing withdrawal:", requests[i].shares);
-                console.log("Processing assets:", assets);
                 totalShares += requests[i].shares;
                 totalAssets_ += assets;
                 requests[i].processed = true;
             }
         }
 
-        console.log("Total shares to Burn:", totalShares);
-
         if (totalShares == 0) revert WithdrawalTooEarly();
-        console.log("Total assets to withdraw:", totalAssets_);
 
         // Check if vault has enough liquidity
         uint256 availableLiquidity = IERC20(asset()).balanceOf(address(this));
-        console.log("Available liquidity:", availableLiquidity);
         if (totalAssets_ > availableLiquidity) {
             revert InsufficientLiquidity();
         }
@@ -172,15 +160,12 @@ contract DeltaNeutralVault is ERC4626, Pausable, Roles {
 
         // Burn shares and transfer assets
         _burn(msg.sender, totalShares);
-        console.log("Total assets to transfer:", totalAssets_);
-        console.log("Total balance of Vault: ", availableLiquidity);
         IERC20(asset()).transfer(msg.sender, totalAssets_);
-        console.log("Total assets transferred:", totalAssets_);
 
         emit WithdrawalProcessed(msg.sender, totalShares, totalAssets_);
     }
 
-    // Add a helper function to check if withdrawals can be processed
+    // helper function to check if withdrawals can be processed
     function canProcessWithdrawals(address user) external view returns (bool) {
         WithdrawalRequest[] storage requests = withdrawalQueue[user];
         uint256 totalAssetsNeeded;
