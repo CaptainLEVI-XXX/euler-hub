@@ -250,9 +250,7 @@ contract StrategyEngine is Roles {
         return _abs(pairDelta) > (params.rebalanceThreshold);
     }
 
-    function _calculateCorrelation(address pair) internal view returns (uint256) {
-        // Simplified correlation calculation
-        // In production, would use historical price data
+    function _calculateCorrelation() internal pure returns (uint256) {
         return 20e16; // 20% correlation placeholder
     }
 
